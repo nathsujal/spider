@@ -7,14 +7,18 @@ pub struct VectorIndex {
 
 impl VectorIndex {
     /// Creates a new HNSW index.
-    pub fn new() -> Self {
-        let max_nb_connection = 16;
-        let max_elements = 10_000; // Initial capacity
+    pub fn new(
+        m: Option<usize>,
+        max_elements: Option<usize>,
+        ef_construction: Option<usize>,
+    ) -> Self {
+        let m = m.unwrap_or(16);
+        let max_elements = max_elements.unwrap_or(1_000_000);
+        let ef_construction = ef_construction.unwrap_or(200);
         let max_layer = 16;
-        let ef_construction = 200;
 
         let index = Hnsw::new(
-            max_nb_connection, 
+            m, 
             max_elements, 
             max_layer, 
             ef_construction, 
@@ -32,8 +36,8 @@ impl VectorIndex {
     }
 
     /// Searches for the nearest neighbors.
-    pub fn search(&self, query: &[f32], k: usize) -> Vec<(u64, f32)> {
-        let ef_search = 64; // Search parameter
+    pub fn search(&self, query: &[f32], k: usize, ef_search: Option<usize>) -> Vec<(u64, f32)> {
+        let ef_search = ef_search.unwrap_or(64); // Search parameter
         let results = self.index.search(query, k, ef_search);
         
         // hnsw_rs returns (Neighbor { d_id, distance, ... })

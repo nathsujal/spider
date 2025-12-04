@@ -11,8 +11,8 @@ pub struct SpiderDB {
     headers: Vec<NodeHeader>,
     /// Variable-length content storage.
     data_heap: Vec<u8>,
-    /// Contiguous list of edge IDs.
-    edge_list: Vec<u64>,
+    /// Adjacency list (Vector of Vectors) for easy updates
+    edge_list: Vec<Vec<u64>>,
     /// Vector embeddings for nodes.
     embeddings: Vec<Vec<f32>>,
     /// HNSW Index for fast approximate nearest neighbor search.
@@ -21,14 +21,23 @@ pub struct SpiderDB {
 
 #[pymethods]
 impl SpiderDB {
+    // The #[new] macro handles Python arguments
     #[new]
-    pub fn new() -> Self {
+    pub fn new(
+        max_capacity: Option<usize>,
+        m: Option<usize>,
+        ef_construction: Option<usize>
+    ) -> Self {
+        // We don't even need to unwrap here if we pass Options down to search.rs
+        // But for vectors, we usually want to reserve capacity immediately.
+        let cap = max_capacity.unwrap_or(1_000_000);
+
         SpiderDB {
-            headers: Vec::new(),
-            data_heap: Vec::new(),
-            edge_list: Vec::new(),
-            embeddings: Vec::new(),
-            index: search::VectorIndex::new(),
+            headers: Vec::with_capacity(cap),
+            data_heap: Vec::with_capacity(cap * 100),
+            edge_list: Vec::with_capacity(cap),
+            embeddings: Vec::with_capacity(cap),
+            index: search::VectorIndex::new(m, max_capacity, ef_construction),
         }
     }
 
@@ -57,11 +66,14 @@ impl SpiderDB {
         // Keep raw embeddings for now (optional, but good for debugging)
         self.embeddings.push(embedding);
 
+        // Initialize empty edge list for this new node
+        self.edge_list.push(Vec::new());
+
         let header = NodeHeader {
             id,
             data_offset,
             data_len,
-            edge_start: self.edge_list.len() as u32,
+            edge_start: 0,
             edge_count: 0,
             last_access_ts: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -75,48 +87,26 @@ impl SpiderDB {
         id
     }
 
-    /// Adds a directed edge from source to target.
+    /// Adds a Bi-directional edge from source to target.
     ///
     /// # Arguments
     ///
     /// * `source_id` - ID of the source node.
     /// * `target_id` - ID of the target node.
+    ///
+    /// A -> B AND B -> A === A <-> B
     pub fn add_edge(&mut self, source_id: u64, target_id: u64) {
         if source_id as usize >= self.headers.len() || target_id as usize >= self.headers.len() {
             return;
         }
+        
+        // 1. Add Forward Link (Source -> Target) [Child]
+        self.edge_list[source_id as usize].push(target_id);
+        self.headers[source_id as usize].edge_count += 1;
 
-        // Note: This is a simplified edge addition. 
-        // In a real graph, we might need to handle resizing or linked lists if edge_count grows.
-        // For this MVP, we are just appending to edge_list, but we aren't updating edge_start/count 
-        // dynamically in a way that supports random insertions efficiently without pre-allocation.
-        // However, the prompt asks for "Simple tuple push". 
-        // Given the constraints, we will just push to edge_list.
-        // BUT, NodeHeader has edge_start and edge_count. 
-        // If we just push, we break the contiguous assumption if we add edges to different nodes interleaved.
-        // For MVP, let's assume we just store the edge. 
-        // To strictly follow "Simple tuple push", we might just be storing (source, target) in edge_list?
-        // The prompt says "edge_list: Vec<u64> (Contiguous Edge IDs)".
-        // Let's implement a simple append and update the header if it's the *next* expected edge, 
-        // or just acknowledge this limitation for MVP.
-        
-        // Actually, to support "Simple tuple push" correctly with the `edge_start` design, 
-        // we typically need an adjacency list or we only add edges at creation.
-        // Since we are refactoring, let's just push the target_id to edge_list 
-        // and increment edge_count for the source. 
-        // WARNING: This only works if edges for a node are added contiguously!
-        // For a real graph DB, we'd use a linked list or separate edge store.
-        // Let's stick to the prompt's "Simple tuple push" instruction.
-        
-        self.edge_list.push(target_id);
-        
-        // We need to update the source header. 
-        // But if we are appending, we can't easily maintain contiguous blocks for all nodes.
-        // Let's assume for this MVP that `edge_list` is just a log of edges, 
-        // and we aren't strictly enforcing the `edge_start` lookup for now, 
-        // OR we just implement it as requested and note the limitation.
-        
-        // Let's just do nothing complex here to satisfy the "Simple tuple push" requirement.
+        // 2. Add Backward Link (Target -> Source) [Parent]
+        self.edge_list[target_id as usize].push(source_id);
+        self.headers[target_id as usize].edge_count += 1;
     }
 
     /// Retrieves a node's content by ID.
@@ -155,20 +145,40 @@ impl SpiderDB {
     /// # Returns
     ///
     /// * `Vec<u64>` - List of top-k node IDs.
-    pub fn hybrid_search(&self, query_embedding: Vec<f32>, k: usize) -> Vec<u64> {
-        // Use HNSW Index for search
-        let similar = self.index.search(&query_embedding, k * 2);
+    pub fn hybrid_search(&self, query_embedding: Vec<f32>, k: usize, ef_search: Option<usize>) -> Vec<u64> {
+        // Step 1: Vector Search (The GPS)
+        let similar = self.index.search(&query_embedding, k, ef_search);
         
-        // Re-rank using Life Score
-        let mut ranked: Vec<(u64, f32)> = similar.into_iter().map(|(id, sim_score)| {
-            let idx = id as usize;
-            let life_score = bio::calc_life_score(&self.headers[idx]);
-            // Simple hybrid score: Similarity * LifeScore
-            (id, sim_score * life_score)
+        // Step 2: Graph Traversal (The Expansion)
+        // We collect the matches AND their direct neighbors
+        let mut context_pool = Vec::new();
+        
+        for (id, _score) in similar {
+            context_pool.push(id); 
+            
+            // Pull NEIGHBORS, PARENTS (incoming), and CHILDREN (outgoing)
+            if let Some(neighbors) = self.edge_list.get(id as usize) {
+                for &neighbor_id in neighbors {
+                    context_pool.push(neighbor_id);
+                }
+            }
+        }
+
+        // Step 3: Deduplicate & Rank by Life Score
+        context_pool.sort();
+        context_pool.dedup();
+        
+        // Re-rank the expanded pool purely by Biological Importance
+        let mut final_results: Vec<(u64, f32)> = context_pool.into_iter().map(|id| {
+            let bio_score = bio::calc_life_score(&self.headers[id as usize]);
+            (id, bio_score)
         }).collect();
 
-        ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
-        ranked.into_iter().take(k).map(|(id, _)| id).collect()
+        // Sort desc by Life Score
+        final_results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+        
+        // Return top K from the *expanded* set
+        final_results.into_iter().take(k).map(|(id, _)| id).collect()
     }
 
     /// Identifies nodes that should be removed based on their Life Score.
@@ -181,5 +191,13 @@ impl SpiderDB {
             }
         }
         dead_nodes
+    }
+
+    /// Calculates the life score of a node.
+    pub fn calculate_life_score(&self, id: u64) -> f32 {
+        if id as usize >= self.headers.len() {
+            return 0.0;
+        }
+        bio::calc_life_score(&self.headers[id as usize])
     }
 }
