@@ -85,18 +85,21 @@ impl SpiderDB {
         })
     }
 
-    /// Adds a new node to the database.
+    /// Adds a new node and AUTOMATICALLY links (bi-directional) it to relevant existing nodes.
     ///
     /// # Arguments
-    ///
-    /// * `content` - The string content of the node.
-    /// * `embedding` - The vector embedding of the node.
-    /// * `significance` - The significance score (0-255).
-    ///
-    /// # Returns
-    ///
-    /// * `u64` - The ID of the newly created node.
-    pub fn add_node(&mut self, content: String, embedding: Vec<f32>, significance: u8) -> u64 {
+    /// * `content` - Text content.
+    /// * `embedding` - Vector.
+    /// * `significance` - Bio-importance.
+    /// * `auto_link_threshold` (Option<f32>) - If set (e.g., 0.75), automatically creates edges 
+    ///                                          to existing nodes with similarity > threshold.
+    pub fn add_node(
+        &mut self, 
+        content: String, 
+        embedding: Vec<f32>, 
+        significance: u8, 
+        auto_link_threshold: Option<f32>
+    ) -> u64 {
         let id = self.headers.len() as u64;
         let data_bytes = content.as_bytes();
         let data_offset = self.data_heap.len() as u64;
@@ -108,7 +111,7 @@ impl SpiderDB {
         self.index.add(id, &embedding);
         
         // Keep raw embeddings for now (optional, but good for debugging)
-        self.embeddings.push(embedding);
+        self.embeddings.push(embedding.clone());
 
         // Initialize empty edge list for this new node
         self.edge_list.push(Vec::new());
@@ -128,6 +131,34 @@ impl SpiderDB {
         };
 
         self.headers.push(header);
+
+        // --- AUTO-LINKING LOGIC ---
+        // Default to 0.8 if not provided.
+        let threshold = auto_link_threshold.unwrap_or(0.8);
+
+        // Search existing nodes (k=10 to ensure we find valid candidates)
+        let similar_nodes = self.index.search(&embedding, 10, Some(64)); 
+
+        let mut edges_to_add = Vec::new();
+        let max_auto_links = 3; // <--- LIMIT TO TOP 3
+
+        for (neighbor_id, similarity) in similar_nodes {
+            // Don't link to self, and only link if similarity is strong enough
+            if neighbor_id != id && similarity >= threshold {
+                edges_to_add.push(neighbor_id);
+                
+                // Stop if we have enough links
+                if edges_to_add.len() >= max_auto_links {
+                    break;
+                }
+            }
+        }
+
+        // Apply edges
+        for neighbor_id in edges_to_add {
+            self.add_edge(id, neighbor_id);
+        }
+
         id
     }
 
@@ -179,6 +210,15 @@ impl SpiderDB {
         String::from_utf8(bytes.to_vec()).ok()
     }
 
+    /// --- Get Neighbors ---
+    pub fn get_neighbors(&self, id: u64) -> Vec<u64> {
+        if id as usize >= self.edge_list.len() {
+            return Vec::new();
+        }
+        // Return a clone of the neighbor list
+        self.edge_list[id as usize].clone()
+    }
+
     /// Performs a hybrid search combining vector similarity and biological score.
     ///
     /// # Arguments
@@ -188,8 +228,9 @@ impl SpiderDB {
     ///
     /// # Returns
     ///
-    /// * `Vec<u64>` - List of top-k node IDs.
-    pub fn hybrid_search(&self, query_embedding: Vec<f32>, k: usize, ef_search: Option<usize>) -> Vec<u64> {
+    /// * `Vec<(u64, f32)>` - List of top-k (node_id, score).
+    pub fn hybrid_search(&self, query_embedding: Vec<f32>, k: usize, ef_search: Option<usize>) -> Vec<(u64, f32)> {
+        let min_score = 0.3;
         // Step 1: Vector Search (The GPS)
         let similar = self.index.search(&query_embedding, k, ef_search);
         
@@ -208,21 +249,25 @@ impl SpiderDB {
             }
         }
 
-        // Step 3: Deduplicate & Rank by Life Score
+        // Step 3: Deduplicate
         context_pool.sort();
         context_pool.dedup();
         
-        // Re-rank the expanded pool purely by Biological Importance
+        // Step 4: Rank by Similarity (Cosine)
+        // We calculate the exact cosine similarity for every candidate in the pool.
         let mut final_results: Vec<(u64, f32)> = context_pool.into_iter().map(|id| {
-            let bio_score = bio::calc_life_score(&self.headers[id as usize]);
-            (id, bio_score)
-        }).collect();
+            let node_embedding = &self.embeddings[id as usize];
+            let score = search::cosine_similarity(&query_embedding, node_embedding);
+            (id, score)
+        })
+        .filter(|&(_, score)| score >= min_score)
+        .collect();
 
-        // Sort desc by Life Score
-        final_results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+        // Sort desc by Similarity
+        final_results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         
-        // Return top K from the *expanded* set
-        final_results.into_iter().take(k).map(|(id, _)| id).collect()
+        // Return top K
+        final_results.into_iter().take(k).collect()
     }
 
     /// Identifies nodes that should be removed based on their Life Score.
@@ -274,5 +319,43 @@ impl SpiderDB {
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
             
         Ok(())
+    }
+
+    /// Exports the entire graph for visualization.
+    /// Returns a tuple: (nodes, edges)
+    /// - nodes: List of (id, label, significance)
+    /// - edges: List of (source_id, target_id)
+    pub fn get_all_graph_data(&self) -> (Vec<(u64, String, u8)>, Vec<(u64, u64)>) {
+        let mut nodes = Vec::new();
+        let mut edges = Vec::new();
+
+        // 1. Collect Nodes
+        for header in &self.headers {
+            // Fetch a short snippet of text for the label
+            let start = header.data_offset as usize;
+            let end = start + header.data_len as usize;
+            
+            let label = if end <= self.data_heap.len() {
+                // Get first 30 chars of content
+                let slice = &self.data_heap[start..end];
+                let full_text = String::from_utf8_lossy(slice);
+                full_text.chars().take(30).collect::<String>()
+            } else {
+                format!("Node {}", header.id)
+            };
+            
+            nodes.push((header.id, label, header.significance));
+        }
+
+        // 2. Collect Edges
+        for (source_idx, targets) in self.edge_list.iter().enumerate() {
+            let source_id = source_idx as u64;
+            for &target_id in targets {
+                // Only export unique edges to avoid clutter (optional)
+                edges.push((source_id, target_id));
+            }
+        }
+
+        (nodes, edges)
     }
 }
