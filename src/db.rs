@@ -40,6 +40,20 @@ pub struct SpiderDB {
     cluster_config: ClusterConfig,
     /// Path to the database file.
     file_path: Option<String>,
+    
+    // ========================================================================
+    // AUTO-NOTIFY CONFIGURATION
+    // These fields enable automatic notification to the visualization server
+    // whenever the database is saved.
+    // ========================================================================
+    
+    /// URL of the visualization server (e.g., "http://localhost:3000")
+    /// When set, the database will automatically notify the server on save.
+    server_url: Option<String>,
+    
+    /// Whether to automatically notify the server when save() is called.
+    /// Defaults to true. Set to false to disable auto-notify.
+    auto_notify: bool,
 }
 
 #[pymethods]
@@ -78,6 +92,8 @@ impl SpiderDB {
                 file_path: Some(db_path),
                 clusters: snapshot.clusters,
                 cluster_config: snapshot.cluster_config,
+                server_url: None,           // No server by default
+                auto_notify: true,           // Auto-notify enabled by default
             });
         }
 
@@ -92,6 +108,8 @@ impl SpiderDB {
             file_path: Some(db_path), // Remember the path (even if it doesn't exist yet)
             clusters: None,
             cluster_config: ClusterConfig::default(),
+            server_url: None,           // No server by default
+            auto_notify: true,           // Auto-notify enabled by default
         })
     }
 
@@ -383,7 +401,59 @@ impl SpiderDB {
         bio::calc_life_score(&self.headers[id as usize])
     }
 
-    /// Saves the database.
+    // ========================================================================
+    // AUTO-NOTIFY CONFIGURATION METHODS
+    // ========================================================================
+
+    /// Set the visualization server URL.
+    /// 
+    /// When set, the database will automatically POST to {server_url}/api/notify
+    /// whenever save() is called, triggering a realtime update in connected browsers.
+    /// 
+    /// Example:
+    ///     db.set_server_url("http://localhost:3000")
+    ///     db.add_node(...)
+    ///     db.save()  # Automatically notifies the server
+    pub fn set_server_url(&mut self, url: String) {
+        self.server_url = Some(url);
+    }
+
+    /// Enable or disable automatic server notification on save.
+    /// 
+    /// When enabled (default), calling save() will also notify the visualization
+    /// server if server_url is set.
+    pub fn set_auto_notify(&mut self, enabled: bool) {
+        self.auto_notify = enabled;
+    }
+
+    /// Get the current server URL (if set)
+    pub fn get_server_url(&self) -> Option<String> {
+        self.server_url.clone()
+    }
+
+    /// Manually trigger a server notification.
+    /// 
+    /// This is useful if you want to notify without saving, or if auto_notify is disabled.
+    /// Returns true if notification was successful, false otherwise.
+    pub fn notify(&self) -> bool {
+        if let Some(ref url) = self.server_url {
+            match self.send_notify(url) {
+                Ok(_) => true,
+                Err(e) => {
+                    eprintln!("[SpiderDB] Failed to notify server: {}", e);
+                    false
+                }
+            }
+        } else {
+            eprintln!("[SpiderDB] No server URL set. Call set_server_url() first.");
+            false
+        }
+    }
+
+    /// Saves the database and optionally notifies the visualization server.
+    /// 
+    /// If server_url is set and auto_notify is true, this will automatically
+    /// POST to the server's /api/notify endpoint after saving.
     pub fn save(&self, path: Option<String>) -> PyResult<()> {
         let target_path = match path {
             Some(p) => p,
@@ -407,6 +477,19 @@ impl SpiderDB {
         
         bincode::serialize_into(writer, &snapshot)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+
+        // ====================================================================
+        // AUTO-NOTIFY: If server URL is set and auto_notify is enabled,
+        // POST to the server's notify endpoint to trigger realtime updates
+        // ====================================================================
+        if self.auto_notify {
+            if let Some(ref url) = self.server_url {
+                if let Err(e) = self.send_notify(url) {
+                    // Log but don't fail - saving succeeded, notification is optional
+                    eprintln!("[SpiderDB] Auto-notify failed (save succeeded): {}", e);
+                }
+            }
+        }
             
         Ok(())
     }
@@ -476,5 +559,52 @@ impl SpiderDB {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs();
+    }
+
+    // ========================================================================
+    // INTERNAL HELPERS: Notification to visualization server
+    // ========================================================================
+
+    /// Try to send a notification to the server.
+    /// 
+    /// This is a silent helper that only notifies if:
+    /// 1. server_url is set
+    /// 2. auto_notify is enabled
+    /// 
+    /// Failures are logged but don't cause errors.
+    fn try_notify(&self) {
+        if self.auto_notify {
+            if let Some(ref url) = self.server_url {
+                if let Err(e) = self.send_notify(url) {
+                    eprintln!("[SpiderDB] Auto-notify failed: {}", e);
+                }
+            }
+        }
+    }
+    
+    /// Send an HTTP POST to the server's notify endpoint.
+    /// 
+    /// This uses the reqwest blocking client to make a synchronous HTTP call.
+    /// The endpoint triggers a WebSocket broadcast to all connected clients.
+    fn send_notify(&self, server_url: &str) -> Result<(), String> {
+        // Construct the notify endpoint URL
+        let notify_url = format!("{}/api/notify", server_url.trim_end_matches('/'));
+        
+        // Use reqwest blocking client (sync)
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(5))
+            .build()
+            .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+        
+        // Send POST request
+        let response = client.post(&notify_url)
+            .send()
+            .map_err(|e| format!("Failed to send notify request: {}", e))?;
+        
+        if response.status().is_success() {
+            Ok(())
+        } else {
+            Err(format!("Server returned error status: {}", response.status()))
+        }
     }
 }
