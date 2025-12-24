@@ -46,4 +46,4 @@ anyhow = "1.0"          # Error handling
 hnsw_rs = "0.3"         # HNSW vector index
 
 # --- HTTP Client (for auto-notify from SpiderDB) ---
-reqwest = { version = "0.12", features = ["blocking"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "blocking"] }
