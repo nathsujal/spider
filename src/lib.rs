@@ -10,12 +10,16 @@ use pyo3::prelude::*;
 // pub mod ranking;
 
 pub mod schema;
+pub mod store;
 
 // Re-export schema types
 pub use schema::{
     NodeRecord, RelRecord, PropertyRecord, PropertyBlock, PropertyType,
     DynamicStringRecord, DynamicArrayRecord, TokenStore,
 };
+
+// Re-export store types
+pub use store::{RecordFile, FreeList, Metadata, Record, StoreError};
 
 /// A Python module implemented in Rust.
 #[pymodule]
