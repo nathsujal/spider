@@ -2,10 +2,10 @@
 //!
 //! Database metadata persisted to `meta.db`.
 //!
-//! Tracks next IDs for all record types, ensuring ID uniqueness
-//! across database restarts.
+//! Tracks next IDs for all record types and database-level
+//! bio scoring parameters.
 //!
-//! ## Layout (20 bytes)
+//! ## Layout (44 bytes)
 //!
 //! ```text
 //! Metadata
@@ -13,7 +13,10 @@
 //! ├── next_rel_id: u32
 //! ├── next_prop_id: u32
 //! ├── next_string_id: u32
-//! └── next_array_id: u32
+//! ├── next_array_id: u32
+//! ├── bio_w_sig: f64       (significance weight)
+//! ├── bio_w_freq: f64      (frequency weight)
+//! └── bio_gravity: f64     (decay exponent)
 //! ```
 
 use std::fs::{self, File};
@@ -22,23 +25,33 @@ use std::path::Path;
 
 use super::Result;
 
-/// Database metadata (20 bytes).
+/// Database metadata (44 bytes).
 ///
 /// All IDs start at 1. ID 0 is reserved for deleted/empty.
-#[derive(Debug, Clone, Default)]
+/// Bio params default to 1.0 and are tunable per-database.
+#[derive(Debug, Clone)]
 pub struct Metadata {
+    // ── ID Counters (20 bytes) ──
     pub next_node_id: u32,
     pub next_rel_id: u32,
     pub next_prop_id: u32,
     pub next_string_id: u32,
     pub next_array_id: u32,
+
+    // ── Bio Scoring Config (24 bytes) ──
+    /// Weight for significance component in bio score.
+    pub bio_w_sig: f64,
+    /// Weight for frequency component in bio score.
+    pub bio_w_freq: f64,
+    /// Decay exponent (higher = faster forgetting).
+    pub bio_gravity: f64,
 }
 
 impl Metadata {
     /// Serialized size in bytes.
-    pub const SIZE: usize = 20;
+    pub const SIZE: usize = 44;
 
-    /// Create new metadata with all IDs starting at 1.
+    /// Create new metadata with defaults.
     pub fn new() -> Self {
         Self {
             next_node_id: 1,
@@ -46,6 +59,9 @@ impl Metadata {
             next_prop_id: 1,
             next_string_id: 1,
             next_array_id: 1,
+            bio_w_sig: 1.0,
+            bio_w_freq: 1.0,
+            bio_gravity: 1.0,
         }
     }
 
@@ -82,6 +98,9 @@ impl Metadata {
         bytes[8..12].copy_from_slice(&self.next_prop_id.to_le_bytes());
         bytes[12..16].copy_from_slice(&self.next_string_id.to_le_bytes());
         bytes[16..20].copy_from_slice(&self.next_array_id.to_le_bytes());
+        bytes[20..28].copy_from_slice(&self.bio_w_sig.to_le_bytes());
+        bytes[28..36].copy_from_slice(&self.bio_w_freq.to_le_bytes());
+        bytes[36..44].copy_from_slice(&self.bio_gravity.to_le_bytes());
         bytes
     }
 
@@ -93,7 +112,16 @@ impl Metadata {
             next_prop_id: u32::from_le_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]),
             next_string_id: u32::from_le_bytes([bytes[12], bytes[13], bytes[14], bytes[15]]),
             next_array_id: u32::from_le_bytes([bytes[16], bytes[17], bytes[18], bytes[19]]),
+            bio_w_sig: f64::from_le_bytes([bytes[20], bytes[21], bytes[22], bytes[23], bytes[24], bytes[25], bytes[26], bytes[27]]),
+            bio_w_freq: f64::from_le_bytes([bytes[28], bytes[29], bytes[30], bytes[31], bytes[32], bytes[33], bytes[34], bytes[35]]),
+            bio_gravity: f64::from_le_bytes([bytes[36], bytes[37], bytes[38], bytes[39], bytes[40], bytes[41], bytes[42], bytes[43]]),
         }
+    }
+}
+
+impl Default for Metadata {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

@@ -4,15 +4,20 @@
 //! - Up to 4 labels (e.g., Person, Document, Entity)
 //! - A linked list of properties
 //! - A linked list of relationships
+//! - Bio metrics (access count, timestamps, significance)
 //!
-//! ## Storage Layout (16 bytes)
+//! ## Storage Layout (29 bytes)
 //!
 //! ```text
 //! NodeRecord
-//! ├── id: u32           (0 = deleted)
-//! ├── first_rel_id: u32 (0 = no relationships)
-//! ├── first_prop_id: u32 (0 = no properties)
-//! └── labels: [u8; 4]   (0 = empty slot)
+//! ├── id: u32              (0 = deleted)
+//! ├── first_rel_id: u32    (0 = no relationships)
+//! ├── first_prop_id: u32   (0 = no properties)
+//! ├── labels: [u8; 4]      (0 = empty slot)
+//! ├── access_count: u32    (frequency of access)
+//! ├── created_at: u32      (unix seconds)
+//! ├── last_accessed_at: u32(unix seconds)
+//! └── significance: u8     (0-255, importance)
 //! ```
 //!
 //! ## Example
@@ -20,19 +25,20 @@
 //! ```rust
 //! use spider::schema::NodeRecord;
 //!
-//! let mut node = NodeRecord::new(1, &[1, 2]); // ID 1, labels 1 and 2
+//! let mut node = NodeRecord::new(1, &[1, 2], 1000);
 //! node.add_label(3);
 //! assert!(node.has_label(1));
 //! assert!(node.has_label(2));
 //! assert!(node.has_label(3));
 //! ```
 
-/// A graph node (16 bytes serialized).
+/// A graph node (29 bytes serialized).
 ///
 /// Node IDs start at 1. ID 0 indicates a deleted/unused slot.
 /// Labels use token IDs from [`TokenStore`](super::TokenStore).
 #[derive(Debug, Clone, Copy)]
 pub struct NodeRecord {
+    // ── Structure (16 bytes) ──
     /// Node ID. 0 = deleted/unused slot.
     pub id: u32,
     /// First relationship ID in the chain. 0 = no relationships.
@@ -41,17 +47,33 @@ pub struct NodeRecord {
     pub first_prop_id: u32,
     /// Up to 4 label token IDs. 0 = empty slot.
     pub labels: [u8; 4],
+
+    // ── Bio Metrics (12 bytes) ──
+    /// Number of times this node was accessed/retrieved.
+    pub access_count: u32,
+    /// Unix timestamp (seconds) when node was created.
+    pub created_at: u32,
+    /// Unix timestamp (seconds) of last access. Used for decay calculation.
+    pub last_accessed_at: u32,
+
+    // ── Tuning (1 byte) ──
+    /// User-assigned importance (0-255). Maps to 0.0-1.0. Default 128 (0.5).
+    pub significance: u8,
 }
 
 impl NodeRecord {
     /// Serialized size in bytes.
-    pub const SIZE: usize = 16;
+    pub const SIZE: usize = 29;
 
-    /// Create a new node with the given ID and initial labels.
+    /// Create a new node with the given ID, labels, and current timestamp.
     ///
-    /// # Panics
-    /// Silently ignores labels beyond the first 4.
-    pub fn new(id: u32, labels: &[u8]) -> Self {
+    /// Initializes bio metrics: access_count = 1, significance = 128 (0.5).
+    ///
+    /// # Arguments
+    /// * `id` - Node ID (must be > 0)
+    /// * `labels` - Up to 4 label token IDs
+    /// * `now` - Current Unix timestamp in seconds
+    pub fn new(id: u32, labels: &[u8], now: u32) -> Self {
         let mut label_arr = [0u8; 4];
         for (i, &label) in labels.iter().take(4).enumerate() {
             label_arr[i] = label;
@@ -61,6 +83,10 @@ impl NodeRecord {
             first_rel_id: 0,
             first_prop_id: 0,
             labels: label_arr,
+            access_count: 1,
+            created_at: now,
+            last_accessed_at: now,
+            significance: 128,
         }
     }
 
@@ -72,6 +98,10 @@ impl NodeRecord {
             first_rel_id: 0,
             first_prop_id: 0,
             labels: [0; 4],
+            access_count: 0,
+            created_at: 0,
+            last_accessed_at: 0,
+            significance: 0,
         }
     }
 
@@ -138,23 +168,34 @@ impl NodeRecord {
         self.labels.iter().copied().filter(|&l| l != 0).collect()
     }
 
-    /// Serialize to bytes (little-endian).
+    /// Serialize to bytes (little-endian, 32 bytes).
     pub fn to_bytes(&self) -> [u8; Self::SIZE] {
         let mut bytes = [0u8; Self::SIZE];
+        // Links (16 bytes)
         bytes[0..4].copy_from_slice(&self.id.to_le_bytes());
         bytes[4..8].copy_from_slice(&self.first_rel_id.to_le_bytes());
         bytes[8..12].copy_from_slice(&self.first_prop_id.to_le_bytes());
         bytes[12..16].copy_from_slice(&self.labels);
+        // Bio Metrics (12 bytes)
+        bytes[16..20].copy_from_slice(&self.access_count.to_le_bytes());
+        bytes[20..24].copy_from_slice(&self.created_at.to_le_bytes());
+        bytes[24..28].copy_from_slice(&self.last_accessed_at.to_le_bytes());
+        // Tuning (1 byte)
+        bytes[28] = self.significance;
         bytes
     }
 
-    /// Deserialize from bytes (little-endian).
+    /// Deserialize from bytes (little-endian, 32 bytes).
     pub fn from_bytes(bytes: [u8; Self::SIZE]) -> Self {
         Self {
             id: u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]),
             first_rel_id: u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]),
             first_prop_id: u32::from_le_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]),
             labels: [bytes[12], bytes[13], bytes[14], bytes[15]],
+            access_count: u32::from_le_bytes([bytes[16], bytes[17], bytes[18], bytes[19]]),
+            created_at: u32::from_le_bytes([bytes[20], bytes[21], bytes[22], bytes[23]]),
+            last_accessed_at: u32::from_le_bytes([bytes[24], bytes[25], bytes[26], bytes[27]]),
+            significance: bytes[28],
         }
     }
 }
@@ -170,19 +211,16 @@ impl Default for NodeRecord {
 // ─────────────────────────────────────────────────────────────────────────────
 
 impl crate::store::Record for NodeRecord {
-    const SIZE: usize = 16;
+    const SIZE: usize = 29;
 
     fn to_bytes(&self) -> Vec<u8> {
         self.to_bytes().to_vec()
     }
 
     fn from_bytes(bytes: &[u8]) -> Self {
-        Self::from_bytes([
-            bytes[0], bytes[1], bytes[2], bytes[3],
-            bytes[4], bytes[5], bytes[6], bytes[7],
-            bytes[8], bytes[9], bytes[10], bytes[11],
-            bytes[12], bytes[13], bytes[14], bytes[15],
-        ])
+        let mut arr = [0u8; 29];
+        arr.copy_from_slice(&bytes[..29]);
+        Self::from_bytes(arr)
     }
 
     fn is_deleted(&self) -> bool {
@@ -200,17 +238,24 @@ mod tests {
 
     #[test]
     fn node_size() {
-        assert_eq!(std::mem::size_of::<NodeRecord>(), NodeRecord::SIZE);
+        // Serialized size (manual layout) — not the same as mem::size_of
+        // because Rust adds padding for alignment
+        assert_eq!(NodeRecord::SIZE, 29);
     }
 
     #[test]
     fn node_creation() {
-        let node = NodeRecord::new(1, &[1, 2]);
+        let node = NodeRecord::new(1, &[1, 2], 1000);
         assert_eq!(node.id, 1);
         assert_eq!(node.label_count(), 2);
         assert!(node.has_label(1));
         assert!(node.has_label(2));
         assert!(!node.has_label(3));
+        // Bio defaults
+        assert_eq!(node.access_count, 1);
+        assert_eq!(node.created_at, 1000);
+        assert_eq!(node.last_accessed_at, 1000);
+        assert_eq!(node.significance, 128);
     }
 
     #[test]
@@ -218,13 +263,13 @@ mod tests {
         let node = NodeRecord::empty();
         assert!(node.is_deleted());
 
-        let node = NodeRecord::new(1, &[]);
+        let node = NodeRecord::new(1, &[], 1000);
         assert!(!node.is_deleted());
     }
 
     #[test]
     fn add_remove_label() {
-        let mut node = NodeRecord::new(1, &[]);
+        let mut node = NodeRecord::new(1, &[], 1000);
 
         assert!(node.add_label(1));
         assert!(node.has_label(1));
@@ -243,9 +288,11 @@ mod tests {
 
     #[test]
     fn node_serialization() {
-        let mut node = NodeRecord::new(42, &[1, 5]);
+        let mut node = NodeRecord::new(42, &[1, 5], 1000);
         node.first_rel_id = 100;
         node.first_prop_id = 200;
+        node.access_count = 50;
+        node.significance = 200;
 
         let restored = NodeRecord::from_bytes(node.to_bytes());
 
@@ -253,5 +300,9 @@ mod tests {
         assert_eq!(node.first_rel_id, restored.first_rel_id);
         assert_eq!(node.first_prop_id, restored.first_prop_id);
         assert_eq!(node.labels, restored.labels);
+        assert_eq!(restored.access_count, 50);
+        assert_eq!(restored.created_at, 1000);
+        assert_eq!(restored.last_accessed_at, 1000);
+        assert_eq!(restored.significance, 200);
     }
 }

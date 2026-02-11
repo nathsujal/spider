@@ -23,6 +23,7 @@
 mod error;
 pub mod property;
 pub mod query;
+pub mod bio;
 
 pub use error::{DbError, Result};
 pub use property::PropertyValue;
@@ -113,6 +114,22 @@ impl SpiderDB {
         })
     }
 
+    /// Open or create a database, optionally overriding bio scoring parameters.
+    ///
+    /// If `None` is passed for any param, the persisted value (or default 1.0) is kept.
+    pub fn open_with_bio_params<P: AsRef<Path>>(
+        path: P,
+        w_sig: Option<f64>,
+        w_freq: Option<f64>,
+        gravity: Option<f64>,
+    ) -> Result<Self> {
+        let mut db = Self::open(path)?;
+        if let Some(v) = w_sig { db.meta.bio_w_sig = v; }
+        if let Some(v) = w_freq { db.meta.bio_w_freq = v; }
+        if let Some(v) = gravity { db.meta.bio_gravity = v; }
+        Ok(db)
+    }
+
     /// Close the database, flushing all data to disk.
     pub fn close(&mut self) -> Result<()> {
         // Sync record files
@@ -162,8 +179,14 @@ impl SpiderDB {
         // Allocate ID
         let id = self.node_free.allocate(&mut self.meta.next_node_id);
 
-        // Create and write record
-        let node = NodeRecord::new(id, &label_ids[..labels.len()]);
+        // Get current timestamp
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as u32;
+
+        // Create and write record (with bio metrics initialized)
+        let node = NodeRecord::new(id, &label_ids[..labels.len()], now);
         self.nodes.write(id, &node)?;
 
         Ok(id)
@@ -217,6 +240,103 @@ impl SpiderDB {
         self.node_free.free(id);
 
         Ok(())
+    }
+
+    // ─── Bio Operations ──────────────────────────────────────────────────────
+
+    /// "Touch" a node — strengthens the memory.
+    ///
+    /// Increments `access_count` and updates `last_accessed_at` to now.
+    pub fn touch_node(&mut self, id: u32) -> Result<()> {
+        let mut node = self.nodes.read(id).ok_or(DbError::NodeNotFound(id))?;
+        if node.is_deleted() {
+            return Err(DbError::NodeNotFound(id));
+        }
+
+        node.access_count += 1;
+        node.last_accessed_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as u32;
+
+        self.nodes.write(id, &node)?;
+        Ok(())
+    }
+
+    /// Set the significance (importance) of a node.
+    ///
+    /// * `significance`: 0-255 (maps to 0.0-1.0 in the bio formula).
+    pub fn set_significance(&mut self, id: u32, significance: u8) -> Result<()> {
+        let mut node = self.nodes.read(id).ok_or(DbError::NodeNotFound(id))?;
+        if node.is_deleted() {
+            return Err(DbError::NodeNotFound(id));
+        }
+
+        node.significance = significance;
+        self.nodes.write(id, &node)?;
+        Ok(())
+    }
+
+    /// Calculate the current bio score (life force) of a node.
+    ///
+    /// Uses the database-level BioParams (stored in `meta.db`).
+    /// Returns 0.0 if the node doesn't exist or is deleted.
+    pub fn get_bio_score(&self, id: u32) -> f64 {
+        let node = match self.nodes.read(id) {
+            Some(n) if !n.is_deleted() => n,
+            _ => return 0.0,
+        };
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as u32;
+
+        let params = bio::BioParams {
+            w_sig: self.meta.bio_w_sig,
+            w_freq: self.meta.bio_w_freq,
+            gravity: self.meta.bio_gravity,
+        };
+
+        bio::calculate_bio_score_with_params(
+            node.access_count,
+            node.significance,
+            node.last_accessed_at,
+            now,
+            &params,
+        )
+    }
+
+    /// Set the database-level bio scoring parameters.
+    ///
+    /// These are persisted in `meta.db` and used for all nodes.
+    pub fn set_bio_params(&mut self, w_sig: f64, w_freq: f64, gravity: f64) {
+        self.meta.bio_w_sig = w_sig;
+        self.meta.bio_w_freq = w_freq;
+        self.meta.bio_gravity = gravity;
+    }
+
+    /// Get the current bio scoring parameters (w_sig, w_freq, gravity).
+    pub fn get_bio_params(&self) -> (f64, f64, f64) {
+        (self.meta.bio_w_sig, self.meta.bio_w_freq, self.meta.bio_gravity)
+    }
+
+    /// Get all live (non-deleted) node IDs.
+    pub fn get_all_node_ids(&self) -> Vec<u32> {
+        let mut ids = Vec::new();
+        for id in 1..self.meta.next_node_id {
+            if let Some(node) = self.nodes.read(id) {
+                if !node.is_deleted() {
+                    ids.push(id);
+                }
+            }
+        }
+        ids
+    }
+
+    /// Number of live (non-deleted) nodes.
+    pub fn node_count(&self) -> usize {
+        self.get_all_node_ids().len()
     }
 
     // ─── Relationship Operations ─────────────────────────────────────────────
@@ -662,6 +782,75 @@ mod tests {
         // Verify the new property, NOT the old one
         assert_eq!(db.get_node_property(b, "y").unwrap(), Some(PropertyValue::Int(2)));
         assert_eq!(db.get_node_property(b, "x").unwrap(), None);
+    }
+
+    // ─── Bio Scoring Tests ───────────────────────────────────────────────────
+
+    #[test]
+    fn bio_touch_increments_access() {
+        let dir = tempdir().unwrap();
+        let mut db = SpiderDB::open(dir.path()).unwrap();
+
+        let id = db.create_node(&["Memory"]).unwrap();
+        let node = db.get_node(id).unwrap();
+        assert_eq!(node.access_count, 1);
+        assert_eq!(node.significance, 128);
+
+        db.touch_node(id).unwrap();
+        let node = db.get_node(id).unwrap();
+        assert_eq!(node.access_count, 2);
+
+        db.touch_node(id).unwrap();
+        db.touch_node(id).unwrap();
+        let node = db.get_node(id).unwrap();
+        assert_eq!(node.access_count, 4);
+    }
+
+    #[test]
+    fn bio_significance() {
+        let dir = tempdir().unwrap();
+        let mut db = SpiderDB::open(dir.path()).unwrap();
+
+        let id = db.create_node(&["Fact"]).unwrap();
+        assert_eq!(db.get_node(id).unwrap().significance, 128);
+
+        db.set_significance(id, 255).unwrap();
+        assert_eq!(db.get_node(id).unwrap().significance, 255);
+
+        db.set_significance(id, 0).unwrap();
+        assert_eq!(db.get_node(id).unwrap().significance, 0);
+    }
+
+    #[test]
+    fn bio_score_positive_and_increases_with_touch() {
+        let dir = tempdir().unwrap();
+        let mut db = SpiderDB::open(dir.path()).unwrap();
+
+        let id = db.create_node(&["Memory"]).unwrap();
+        let score1 = db.get_bio_score(id);
+        assert!(score1 > 0.0, "Fresh node should have positive score");
+
+        // Touch increases frequency → higher score
+        db.touch_node(id).unwrap();
+        let score2 = db.get_bio_score(id);
+        assert!(score2 > score1, "Touching should increase score");
+
+        // Higher significance → higher score
+        db.set_significance(id, 255).unwrap();
+        let score3 = db.get_bio_score(id);
+        assert!(score3 > score2, "Max significance should boost score");
+    }
+
+    #[test]
+    fn bio_score_deleted_node_is_zero() {
+        let dir = tempdir().unwrap();
+        let mut db = SpiderDB::open(dir.path()).unwrap();
+
+        let id = db.create_node(&["Temp"]).unwrap();
+        assert!(db.get_bio_score(id) > 0.0);
+
+        db.delete_node(id).unwrap();
+        assert_eq!(db.get_bio_score(id), 0.0);
     }
 }
 

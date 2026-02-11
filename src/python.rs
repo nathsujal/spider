@@ -20,9 +20,20 @@ pub struct PySpiderDB {
 #[pymethods]
 impl PySpiderDB {
     /// Create and open a new SpiderDB.
+    ///
+    /// Optionally pass bio scoring parameters to override the defaults.
+    /// If not provided, the persisted values from meta.db are used
     #[new]
-    fn new(path: &str) -> PyResult<Self> {
-        let db = SpiderDB::open(PathBuf::from(path)).map_err(to_py_err)?;
+    #[pyo3(signature = (path, w_sig=None, w_freq=None, gravity=None))]
+    fn new(
+        path: &str,
+        w_sig: Option<f64>,
+        w_freq: Option<f64>,
+        gravity: Option<f64>,
+    ) -> PyResult<Self> {
+        let db = SpiderDB::open_with_bio_params(
+            PathBuf::from(path), w_sig, w_freq, gravity,
+        ).map_err(to_py_err)?;
         Ok(Self { db: Some(db) })
     }
 
@@ -49,6 +60,10 @@ impl PySpiderDB {
             first_rel_id: n.first_rel_id,
             first_prop_id: n.first_prop_id,
             labels: n.get_labels(),
+            access_count: n.access_count,
+            significance: n.significance,
+            created_at: n.created_at,
+            last_accessed_at: n.last_accessed_at,
         }))
     }
 
@@ -221,6 +236,53 @@ impl PySpiderDB {
         db.find_nodes_by_property(key, &val).map_err(to_py_err)
     }
 
+    // ─── Bio Operations ─────────────────────────────────────────────────────
+
+    /// Touch a node — strengthens its memory.
+    fn touch_node(&mut self, id: u32) -> PyResult<()> {
+        let db = self.db.as_mut().ok_or_else(|| PyRuntimeError::new_err("Database is closed"))?;
+        db.touch_node(id).map_err(to_py_err)
+    }
+
+    /// Set the significance (importance) of a node. 0-255.
+    fn set_significance(&mut self, id: u32, significance: u8) -> PyResult<()> {
+        let db = self.db.as_mut().ok_or_else(|| PyRuntimeError::new_err("Database is closed"))?;
+        db.set_significance(id, significance).map_err(to_py_err)
+    }
+
+    /// Get the current bio score (life force) of a node.
+    fn get_bio_score(&self, id: u32) -> PyResult<f64> {
+        let db = self.db.as_ref().ok_or_else(|| PyRuntimeError::new_err("Database is closed"))?;
+        Ok(db.get_bio_score(id))
+    }
+
+    /// Set the database-level bio scoring parameters.
+    ///
+    /// These are persisted to meta.db and used for all nodes.
+    fn set_bio_params(&mut self, w_sig: f64, w_freq: f64, gravity: f64) -> PyResult<()> {
+        let db = self.db.as_mut().ok_or_else(|| PyRuntimeError::new_err("Database is closed"))?;
+        db.set_bio_params(w_sig, w_freq, gravity);
+        Ok(())
+    }
+
+    /// Get the current bio scoring parameters as (w_sig, w_freq, gravity).
+    fn get_bio_params(&self) -> PyResult<(f64, f64, f64)> {
+        let db = self.db.as_ref().ok_or_else(|| PyRuntimeError::new_err("Database is closed"))?;
+        Ok(db.get_bio_params())
+    }
+
+    /// Get all live (non-deleted) node IDs.
+    fn get_all_node_ids(&self) -> PyResult<Vec<u32>> {
+        let db = self.db.as_ref().ok_or_else(|| PyRuntimeError::new_err("Database is closed"))?;
+        Ok(db.get_all_node_ids())
+    }
+
+    /// Number of live (non-deleted) nodes.
+    fn node_count(&self) -> PyResult<usize> {
+        let db = self.db.as_ref().ok_or_else(|| PyRuntimeError::new_err("Database is closed"))?;
+        Ok(db.node_count())
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
 
     /// Close the database, flushing all data to disk.
@@ -282,12 +344,23 @@ pub struct PyNode {
     first_prop_id: u32,
     #[pyo3(get)]
     labels: Vec<u8>,
+    #[pyo3(get)]
+    access_count: u32,
+    #[pyo3(get)]
+    significance: u8,
+    #[pyo3(get)]
+    created_at: u32,
+    #[pyo3(get)]
+    last_accessed_at: u32,
 }
 
 #[pymethods]
 impl PyNode {
     fn __repr__(&self) -> String {
-        format!("Node(id={}, labels={:?})", self.id, self.labels)
+        format!(
+            "Node(id={}, labels={:?}, access={}, sig={})",
+            self.id, self.labels, self.access_count, self.significance
+        )
     }
 }
 

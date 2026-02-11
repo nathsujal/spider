@@ -29,6 +29,7 @@ Cargo.lock
 data/
 
 # Test files
+tools/
 tests/
 test*.py
 test_data/
