@@ -410,6 +410,37 @@ impl SpiderDB {
         Ok(())
     }
 
+    /// Free an entire property chain: all DynStrings + all PropertyRecords.
+    ///
+    /// Called during cascade delete when a node or relationship is removed.
+    /// Walks `first_prop_id → next → next → ...` freeing everything.
+    pub(crate) fn free_all_properties(&mut self, first_prop_id: u32) -> Result<()> {
+        let mut prop_id = first_prop_id;
+
+        while prop_id != 0 {
+            let record = self.props.read(prop_id).ok_or(DbError::Corrupted(
+                format!("Property record {} missing during cascade delete", prop_id),
+            ))?;
+
+            // Free DynStrings in all 4 blocks
+            for block in &record.blocks {
+                if !block.is_empty() {
+                    self.free_block_string(block)?;
+                }
+            }
+
+            let next = record.next_prop_id;
+
+            // Clear and return this PropertyRecord to free list
+            self.props.write(prop_id, &PropertyRecord::new())?;
+            self.prop_free.free(prop_id);
+
+            prop_id = next;
+        }
+
+        Ok(())
+    }
+
     /// Walk a DynamicString chain and free all blocks.
     fn free_dynamic_string(&mut self, start_id: u32) -> Result<()> {
         let mut id = start_id;

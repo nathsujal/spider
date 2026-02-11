@@ -181,14 +181,21 @@ impl SpiderDB {
 
     /// Delete a node by ID.
     ///
-    /// Also deletes all relationships connected to this node.
+    /// Cascade deletes: frees all node properties, then all relationships
+    /// (and their properties), then marks the node as deleted.
     pub fn delete_node(&mut self, id: u32) -> Result<()> {
         let node = self.nodes.read(id).ok_or(DbError::NodeNotFound(id))?;
         if node.is_deleted() {
             return Err(DbError::NodeNotFound(id));
         }
 
+        // Free node's property chain (props + DynStrings)
+        if node.first_prop_id != 0 {
+            self.free_all_properties(node.first_prop_id)?;
+        }
+
         // Delete all relationships from this node
+        // (delete_rel_internal also frees rel properties)
         let mut rel_id = node.first_rel_id;
         while rel_id != 0 {
             if let Some(rel) = self.rels.read(rel_id) {
@@ -294,10 +301,17 @@ impl SpiderDB {
     }
 
     /// Internal relationship deletion with chain unlinking.
+    ///
+    /// Frees all relationship properties before unlinking and marking deleted.
     fn delete_rel_internal(&mut self, id: u32) -> Result<()> {
         let rel = self.rels.read(id).ok_or(DbError::RelNotFound(id))?;
         if rel.is_deleted() {
             return Err(DbError::RelNotFound(id));
+        }
+
+        // Free relationship's property chain (props + DynStrings)
+        if rel.first_prop_id != 0 {
+            self.free_all_properties(rel.first_prop_id)?;
         }
 
         // Unlink from source chain
@@ -523,4 +537,131 @@ mod tests {
         let result = db.create_rel(999, 1, "KNOWS");
         assert!(matches!(result, Err(DbError::SourceNodeNotFound(999))));
     }
+
+    // ─── Cascade Delete Tests ────────────────────────────────────────────────
+
+    #[test]
+    fn cascade_delete_node_frees_properties() {
+        let dir = tempdir().unwrap();
+        let mut db = SpiderDB::open(dir.path()).unwrap();
+
+        let id = db.create_node(&["Person"]).unwrap();
+        db.set_node_property(id, "name", PropertyValue::Int(42)).unwrap();
+        db.set_node_property(id, "age", PropertyValue::Int(30)).unwrap();
+        db.set_node_property(id, "active", PropertyValue::Bool(true)).unwrap();
+
+        // Delete the node — properties should be freed
+        db.delete_node(id).unwrap();
+
+        // Node is gone
+        assert!(db.get_node(id).is_none());
+
+        // Create a new node — it should reuse the freed ID
+        let id2 = db.create_node(&["Doc"]).unwrap();
+        assert_eq!(id2, id, "Freed node ID should be reused");
+
+        // The new node should have NO properties (old ones were freed)
+        assert_eq!(db.get_node_property(id2, "name").unwrap(), None);
+        assert_eq!(db.get_node_property(id2, "age").unwrap(), None);
+    }
+
+    #[test]
+    fn cascade_delete_node_frees_dyn_strings() {
+        let dir = tempdir().unwrap();
+        let mut db = SpiderDB::open(dir.path()).unwrap();
+
+        let id = db.create_node(&["Person"]).unwrap();
+        // Dynamic string (>6 bytes, stored in strings.db)
+        let long_name = "Alice Wonderland of the Long Name";
+        db.set_node_property(id, "name", PropertyValue::String(long_name.into())).unwrap();
+
+        // Delete — should free the DynString chain too
+        db.delete_node(id).unwrap();
+        assert!(db.get_node(id).is_none());
+
+        // Create new node and set a new DynString — should reuse freed string IDs
+        let id2 = db.create_node(&["Doc"]).unwrap();
+        db.set_node_property(id2, "title", PropertyValue::String("Reused".into())).unwrap();
+        assert_eq!(
+            db.get_node_property(id2, "title").unwrap(),
+            Some(PropertyValue::String("Reused".into()))
+        );
+    }
+
+    #[test]
+    fn cascade_delete_node_frees_rel_properties() {
+        let dir = tempdir().unwrap();
+        let mut db = SpiderDB::open(dir.path()).unwrap();
+
+        let a = db.create_node(&["Person"]).unwrap();
+        let b = db.create_node(&["Person"]).unwrap();
+
+        let r = db.create_rel(a, b, "KNOWS").unwrap();
+        db.set_rel_property(r, "since", PropertyValue::Int(2020)).unwrap();
+        db.set_rel_property(r, "weight", PropertyValue::Float(0.9)).unwrap();
+
+        // Delete node A — should cascade: free node props, free rel, free rel props
+        db.delete_node(a).unwrap();
+
+        // Node A gone
+        assert!(db.get_node(a).is_none());
+        // Relationship gone
+        assert!(db.get_rel(r).is_none());
+        // Node B still alive
+        assert!(db.get_node(b).is_some());
+        // B should have no relationships left
+        assert_eq!(db.get_neighbors(b).len(), 0);
+    }
+
+    #[test]
+    fn cascade_delete_rel_frees_properties() {
+        let dir = tempdir().unwrap();
+        let mut db = SpiderDB::open(dir.path()).unwrap();
+
+        let a = db.create_node(&["Person"]).unwrap();
+        let b = db.create_node(&["Person"]).unwrap();
+
+        let r = db.create_rel(a, b, "KNOWS").unwrap();
+        db.set_rel_property(r, "since", PropertyValue::Int(2020)).unwrap();
+        db.set_rel_property(r, "note", PropertyValue::String("Best friends forever".into())).unwrap();
+
+        // Delete just the relationship (nodes stay)
+        db.delete_rel(r).unwrap();
+
+        // Rel is gone
+        assert!(db.get_rel(r).is_none());
+        // Nodes still exist
+        assert!(db.get_node(a).is_some());
+        assert!(db.get_node(b).is_some());
+        // No more neighbors
+        assert_eq!(db.get_neighbors(a).len(), 0);
+    }
+
+    #[test]
+    fn cascade_delete_id_reuse() {
+        let dir = tempdir().unwrap();
+        let mut db = SpiderDB::open(dir.path()).unwrap();
+
+        let a = db.create_node(&["Person"]).unwrap();
+        db.set_node_property(a, "x", PropertyValue::Int(1)).unwrap();
+        let prop_id_before = db.get_node(a).unwrap().first_prop_id;
+        assert_ne!(prop_id_before, 0);
+
+        // Delete — should free node + property IDs
+        db.delete_node(a).unwrap();
+
+        // Create new node — should reuse node ID
+        let b = db.create_node(&["Doc"]).unwrap();
+        assert_eq!(b, a, "Node ID should be reused");
+
+        // Set a property — should reuse property record ID
+        db.set_node_property(b, "y", PropertyValue::Int(2)).unwrap();
+        let prop_id_after = db.get_node(b).unwrap().first_prop_id;
+        assert_eq!(prop_id_after, prop_id_before, "Property record ID should be reused");
+
+        // Verify the new property, NOT the old one
+        assert_eq!(db.get_node_property(b, "y").unwrap(), Some(PropertyValue::Int(2)));
+        assert_eq!(db.get_node_property(b, "x").unwrap(), None);
+    }
 }
+
