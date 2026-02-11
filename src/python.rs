@@ -2,6 +2,7 @@
 
 use pyo3::prelude::*;
 use pyo3::exceptions::PyRuntimeError;
+use pyo3::types::PyBytes;
 use std::path::PathBuf;
 
 use crate::db::{DbError, Direction, PropertyValue, SpiderDB};
@@ -296,6 +297,42 @@ impl PySpiderDB {
     /// Check if database is open.
     fn is_open(&self) -> bool {
         self.db.is_some()
+    }
+
+    // ─── Content Operations ──────────────────────────────────────────────────
+
+    /// Store binary content and create a node for it.
+    ///
+    /// MIME type is auto-detected. Returns (node_id, blob_hash).
+    fn store_content(&mut self, data: &[u8], name: &str, labels: Vec<String>) -> PyResult<(u32, String)> {
+        let db = self.db.as_mut().ok_or_else(|| PyRuntimeError::new_err("DB closed"))?;
+        let label_refs: Vec<&str> = labels.iter().map(|s| s.as_str()).collect();
+        db.store_content(data, name, &label_refs).map_err(to_py_err)
+    }
+
+    /// Read binary content for a content node.
+    fn read_content<'a>(&self, py: Python<'a>, node_id: u32) -> PyResult<&'a PyBytes> {
+        let db = self.db.as_ref().ok_or_else(|| PyRuntimeError::new_err("DB closed"))?;
+        let data = db.read_content(node_id).map_err(to_py_err)?;
+        Ok(PyBytes::new(py, &data))
+    }
+
+    /// Delete a content node and decrement blob ref count.
+    fn delete_content_node(&mut self, node_id: u32) -> PyResult<()> {
+        let db = self.db.as_mut().ok_or_else(|| PyRuntimeError::new_err("DB closed"))?;
+        db.delete_content_node(node_id).map_err(to_py_err)
+    }
+
+    /// Content store stats: (blob_count, total_bytes).
+    fn content_stats(&self) -> PyResult<(usize, u64)> {
+        let db = self.db.as_ref().ok_or_else(|| PyRuntimeError::new_err("DB closed"))?;
+        Ok(db.content_stats())
+    }
+
+    /// Garbage collect unreferenced blobs. Returns count removed.
+    fn content_gc(&mut self) -> PyResult<usize> {
+        let db = self.db.as_mut().ok_or_else(|| PyRuntimeError::new_err("DB closed"))?;
+        db.content_gc().map_err(to_py_err)
     }
 }
 

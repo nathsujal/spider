@@ -44,6 +44,7 @@ futures = "0.3"         # Async stream utilities for WebSocket
 rayon = "1.8"           # Parallel processing
 anyhow = "1.0"          # Error handling
 hnsw_rs = "0.3"         # HNSW vector index
+sha2 = "0.10"            # SHA256 for content-addressed blob store
 
 # --- HTTP Client (for auto-notify from SpiderDB) ---
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "blocking"] }

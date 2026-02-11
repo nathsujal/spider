@@ -24,6 +24,7 @@ mod error;
 pub mod property;
 pub mod query;
 pub mod bio;
+pub mod content;
 
 pub use error::{DbError, Result};
 pub use property::PropertyValue;
@@ -35,6 +36,7 @@ use crate::schema::{
     DynamicArrayRecord, DynamicStringRecord, NodeRecord, PropertyRecord, RelRecord, TokenStore,
 };
 use crate::store::{FreeList, Metadata, RecordFile};
+use content::ContentStore;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SpiderDB
@@ -65,6 +67,9 @@ pub struct SpiderDB {
     labels: TokenStore,
     rel_types: TokenStore,
     prop_keys: TokenStore,
+
+    // Content-addressed blob store
+    content: ContentStore,
 }
 
 impl SpiderDB {
@@ -95,6 +100,9 @@ impl SpiderDB {
         let string_free = Self::load_free_list(&path.join("string_free.bin"));
         let array_free = Self::load_free_list(&path.join("array_free.bin"));
 
+        // Open content store
+        let content = ContentStore::open(&path)?;
+
         Ok(Self {
             path,
             nodes,
@@ -111,6 +119,7 @@ impl SpiderDB {
             labels,
             rel_types,
             prop_keys,
+            content,
         })
     }
 
@@ -153,6 +162,9 @@ impl SpiderDB {
         Self::save_free_list(&self.prop_free, &self.path.join("prop_free.bin"))?;
         Self::save_free_list(&self.string_free, &self.path.join("string_free.bin"))?;
         Self::save_free_list(&self.array_free, &self.path.join("array_free.bin"))?;
+
+        // Flush content store manifest
+        self.content.flush()?;
 
         Ok(())
     }
@@ -495,6 +507,72 @@ impl SpiderDB {
         }
 
         Ok(())
+    }
+
+    // ─── Content / Blob Operations ───────────────────────────────────────────
+
+    /// Store binary content and create a graph node for it.
+    ///
+    /// MIME type is auto-detected from magic bytes / filename.
+    /// Returns `(node_id, blob_hash)`.
+    pub fn store_content(
+        &mut self,
+        data: &[u8],
+        name: &str,
+        labels: &[&str],
+    ) -> Result<(u32, String)> {
+        // 1. Store blob (dedup by hash)
+        let (hash, mime_type) = self.content.store(data, name)?;
+
+        // 2. Create graph node
+        let node_id = self.create_node(labels)?;
+
+        // 3. Set properties
+        self.set_node_property(node_id, "blob_ref", PropertyValue::String(hash.clone()))?;
+        self.set_node_property(node_id, "mime_type", PropertyValue::String(mime_type))?;
+        self.set_node_property(node_id, "original_name", PropertyValue::String(name.to_string()))?;
+        self.set_node_property(node_id, "size_bytes", PropertyValue::Int(data.len() as i64))?;
+
+        Ok((node_id, hash))
+    }
+
+    /// Read binary content for a content node.
+    pub fn read_content(&self, node_id: u32) -> Result<Vec<u8>> {
+        match self.get_node_property(node_id, "blob_ref")? {
+            Some(PropertyValue::String(hash)) => {
+                Ok(self.content.read(&hash)?)
+            }
+            _ => Err(DbError::Corrupted(
+                format!("Node {} has no blob_ref property", node_id)
+            )),
+        }
+    }
+
+    /// Delete a content node and decrement blob ref count.
+    pub fn delete_content_node(&mut self, node_id: u32) -> Result<()> {
+        // Get hash before deleting
+        let hash = match self.get_node_property(node_id, "blob_ref")? {
+            Some(PropertyValue::String(h)) => Some(h),
+            _ => None,
+        };
+
+        // Decrement ref count
+        if let Some(h) = hash {
+            self.content.remove_ref(&h);
+        }
+
+        // Cascade delete node
+        self.delete_node(node_id)
+    }
+
+    /// Get content store stats: (blob_count, total_bytes).
+    pub fn content_stats(&self) -> (usize, u64) {
+        (self.content.blob_count(), self.content.total_size())
+    }
+
+    /// Garbage collect unreferenced blobs. Returns count removed.
+    pub fn content_gc(&mut self) -> Result<usize> {
+        Ok(self.content.gc()?)
     }
 
     // ─── Query Operations ────────────────────────────────────────────────────
