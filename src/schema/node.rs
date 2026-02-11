@@ -166,6 +166,31 @@ impl Default for NodeRecord {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Record Trait
+// ─────────────────────────────────────────────────────────────────────────────
+
+impl crate::store::Record for NodeRecord {
+    const SIZE: usize = 16;
+
+    fn to_bytes(&self) -> Vec<u8> {
+        self.to_bytes().to_vec()
+    }
+
+    fn from_bytes(bytes: &[u8]) -> Self {
+        Self::from_bytes([
+            bytes[0], bytes[1], bytes[2], bytes[3],
+            bytes[4], bytes[5], bytes[6], bytes[7],
+            bytes[8], bytes[9], bytes[10], bytes[11],
+            bytes[12], bytes[13], bytes[14], bytes[15],
+        ])
+    }
+
+    fn is_deleted(&self) -> bool {
+        self.id == 0
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Tests
 // ─────────────────────────────────────────────────────────────────────────────
 

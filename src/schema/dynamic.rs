@@ -287,6 +287,46 @@ impl Default for DynamicArrayRecord {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Record Traits
+// ─────────────────────────────────────────────────────────────────────────────
+
+impl crate::store::Record for DynamicStringRecord {
+    const SIZE: usize = 128;
+
+    fn to_bytes(&self) -> Vec<u8> {
+        self.to_bytes().to_vec()
+    }
+
+    fn from_bytes(bytes: &[u8]) -> Self {
+        let mut arr = [0u8; 128];
+        arr.copy_from_slice(&bytes[..128]);
+        Self::from_bytes(arr)
+    }
+
+    fn is_deleted(&self) -> bool {
+        !self.is_in_use()
+    }
+}
+
+impl crate::store::Record for DynamicArrayRecord {
+    const SIZE: usize = 128;
+
+    fn to_bytes(&self) -> Vec<u8> {
+        self.to_bytes().to_vec()
+    }
+
+    fn from_bytes(bytes: &[u8]) -> Self {
+        let mut arr = [0u8; 128];
+        arr.copy_from_slice(&bytes[..128]);
+        Self::from_bytes(arr)
+    }
+
+    fn is_deleted(&self) -> bool {
+        !self.is_in_use()
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Tests
 // ─────────────────────────────────────────────────────────────────────────────
 

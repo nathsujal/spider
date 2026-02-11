@@ -159,6 +159,17 @@ impl TokenStore {
 
         Some(store)
     }
+
+    /// Load from file. Returns None if file doesn't exist or is invalid.
+    pub fn load(path: &std::path::Path) -> Option<Self> {
+        let bytes = std::fs::read(path).ok()?;
+        Self::from_bytes(&bytes)
+    }
+
+    /// Save to file.
+    pub fn save(&self, path: &std::path::Path) -> std::io::Result<()> {
+        std::fs::write(path, self.to_bytes())
+    }
 }
 
 impl Default for TokenStore {

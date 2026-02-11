@@ -235,6 +235,128 @@ impl PropertyBlock {
     pub fn to_bytes(&self) -> [u8; 8] {
         self.data.to_le_bytes()
     }
+
+    // ─── Type Constructors ───────────────────────────────────────────────────
+
+    /// Create a block storing a boolean.
+    #[inline]
+    pub fn from_bool(key_id: u8, value: bool) -> Self {
+        Self::with_value(key_id, PropertyType::Bool, value as u64)
+    }
+
+    /// Create a block storing a signed integer (must fit in 51 bits).
+    ///
+    /// Returns `None` if the value is outside the range `[-(2^50), 2^50 - 1]`.
+    pub fn from_int(key_id: u8, value: i64) -> Option<Self> {
+        let max: i64 = (1 << 50) - 1;
+        let min: i64 = -(1 << 50);
+        if value < min || value > max {
+            return None;
+        }
+        // Mask to 51 bits (preserves two's complement for negatives)
+        let bits = (value as u64) & Self::VALUE_MASK;
+        Some(Self::with_value(key_id, PropertyType::Int, bits))
+    }
+
+    /// Create a block storing a float (f32).
+    #[inline]
+    pub fn from_float(key_id: u8, value: f32) -> Self {
+        let bits = value.to_bits() as u64;
+        Self::with_value(key_id, PropertyType::Float, bits)
+    }
+
+    // ─── Type Decoders ───────────────────────────────────────────────────────
+
+    /// Decode as boolean. Returns `None` if type doesn't match.
+    #[inline]
+    pub fn as_bool(&self) -> Option<bool> {
+        if self.value_type() == PropertyType::Bool {
+            Some(self.value_bits() != 0)
+        } else {
+            None
+        }
+    }
+
+    /// Decode as signed integer. Returns `None` if type doesn't match.
+    ///
+    /// Sign-extends the 51-bit value back to i64.
+    #[inline]
+    pub fn as_int(&self) -> Option<i64> {
+        if self.value_type() == PropertyType::Int {
+            let raw = self.value_bits();
+            // Check sign bit (bit 50)
+            if raw & (1 << 50) != 0 {
+                // Negative: fill upper bits with 1s
+                Some((raw | !Self::VALUE_MASK) as i64)
+            } else {
+                Some(raw as i64)
+            }
+        } else {
+            None
+        }
+    }
+
+    /// Decode as f32. Returns `None` if type doesn't match.
+    #[inline]
+    pub fn as_float(&self) -> Option<f32> {
+        if self.value_type() == PropertyType::Float {
+            Some(f32::from_bits(self.value_bits() as u32))
+        } else {
+            None
+        }
+    }
+
+    // ─── String Helpers ──────────────────────────────────────────────────────
+
+    /// Create a block storing a short string inline (max 6 UTF-8 bytes).
+    ///
+    /// Layout within the 51 value bits:
+    /// - bits 0-2:  string length (0-6)
+    /// - bits 3-50: up to 6 bytes of UTF-8 data
+    ///
+    /// Returns `None` if the string exceeds 6 bytes.
+    pub fn from_short_string(key_id: u8, s: &str) -> Option<Self> {
+        let bytes = s.as_bytes();
+        if bytes.len() > 6 {
+            return None;
+        }
+        let len = bytes.len() as u64;
+        let mut val: u64 = len; // bits 0-2
+        for (i, &b) in bytes.iter().enumerate() {
+            val |= (b as u64) << (3 + i * 8);
+        }
+        Some(Self::with_value(key_id, PropertyType::ShortString, val))
+    }
+
+    /// Decode an inline short string. Returns `None` if type doesn't match.
+    pub fn as_short_string(&self) -> Option<String> {
+        if self.value_type() != PropertyType::ShortString {
+            return None;
+        }
+        let raw = self.value_bits();
+        let len = (raw & 0x7) as usize; // 3 bits
+        let mut bytes = Vec::with_capacity(len);
+        for i in 0..len {
+            bytes.push(((raw >> (3 + i * 8)) & 0xFF) as u8);
+        }
+        String::from_utf8(bytes).ok()
+    }
+
+    /// Create a block that points to a DynamicStringRecord in `strings.db`.
+    #[inline]
+    pub fn from_dyn_string_ptr(key_id: u8, record_id: u32) -> Self {
+        Self::with_value(key_id, PropertyType::String, record_id as u64)
+    }
+
+    /// Get the DynamicString record ID. Returns `None` if type doesn't match.
+    #[inline]
+    pub fn dyn_string_ptr(&self) -> Option<u32> {
+        if self.value_type() == PropertyType::String {
+            Some(self.value_bits() as u32)
+        } else {
+            None
+        }
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -324,6 +446,29 @@ impl PropertyRecord {
 impl Default for PropertyRecord {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Record Trait
+// ─────────────────────────────────────────────────────────────────────────────
+
+impl crate::store::Record for PropertyRecord {
+    const SIZE: usize = 40;
+
+    fn to_bytes(&self) -> Vec<u8> {
+        self.to_bytes().to_vec()
+    }
+
+    fn from_bytes(bytes: &[u8]) -> Self {
+        let mut arr = [0u8; 40];
+        arr.copy_from_slice(&bytes[..40]);
+        Self::from_bytes(arr)
+    }
+
+    fn is_deleted(&self) -> bool {
+        // PropertyRecord is deleted when all blocks are empty and no links
+        self.prev_prop_id == 0 && self.next_prop_id == 0 && self.block_count() == 0
     }
 }
 

@@ -174,6 +174,28 @@ impl Default for RelRecord {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Record Trait
+// ─────────────────────────────────────────────────────────────────────────────
+
+impl crate::store::Record for RelRecord {
+    const SIZE: usize = 33;
+
+    fn to_bytes(&self) -> Vec<u8> {
+        self.to_bytes().to_vec()
+    }
+
+    fn from_bytes(bytes: &[u8]) -> Self {
+        let mut arr = [0u8; 33];
+        arr.copy_from_slice(&bytes[..33]);
+        Self::from_bytes(arr)
+    }
+
+    fn is_deleted(&self) -> bool {
+        self.id == 0
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Tests
 // ─────────────────────────────────────────────────────────────────────────────
 
