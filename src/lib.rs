@@ -11,6 +11,8 @@ use pyo3::prelude::*;
 
 pub mod schema;
 pub mod store;
+pub mod db;
+mod python;
 
 // Re-export schema types
 pub use schema::{
@@ -21,9 +23,13 @@ pub use schema::{
 // Re-export store types
 pub use store::{RecordFile, FreeList, Metadata, Record, StoreError};
 
+// Re-export database types
+pub use db::{SpiderDB, DbError};
+
 /// A Python module implemented in Rust.
 #[pymodule]
-fn spider(_py: Python, _m: &PyModule) -> PyResult<()> {
-    // TODO: Add Python bindings for schema types
+fn spider(py: Python, m: &PyModule) -> PyResult<()> {
+    python::register(py, m)?;
     Ok(())
 }
+
