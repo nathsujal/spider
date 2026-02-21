@@ -24,12 +24,10 @@ pub use schema::{
 pub use store::{RecordFile, FreeList, Metadata, Record, StoreError};
 
 // Re-export database types
-pub use db::{SpiderDB, DbError};
+pub use db::{Spider, DbError};
 
-/// A Python module implemented in Rust.
 #[pymodule]
-fn spider(py: Python, m: &PyModule) -> PyResult<()> {
-    python::register(py, m)?;
+fn spider(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    python::register(m.py(), m)?;
     Ok(())
 }
-

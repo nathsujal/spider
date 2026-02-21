@@ -1,6 +1,6 @@
 //! # Database Errors
 //!
-//! Error types for SpiderDB operations.
+//! Error types for Spider operations.
 
 use std::path::PathBuf;
 
@@ -12,18 +12,18 @@ pub type Result<T> = std::result::Result<T, DbError>;
 /// Errors that can occur during database operations.
 #[derive(Debug)]
 pub enum DbError {
-    // ─── Store Errors ────────────────────────────────────────
+    // Store Errors
     /// Wrapped storage layer error.
     Store(StoreError),
 
-    // ─── Node Errors ─────────────────────────────────────────
+    // Node Errors
     /// Node with given ID not found or deleted.
     NodeNotFound(u32),
 
     /// Too many labels (max 4).
     TooManyLabels { max: usize },
 
-    // ─── Relationship Errors ─────────────────────────────────
+    // Relationship Errors
     /// Source node does not exist.
     SourceNodeNotFound(u32),
 
@@ -33,15 +33,15 @@ pub enum DbError {
     /// Relationship with given ID not found or deleted.
     RelNotFound(u32),
 
-    // ─── Token Errors ────────────────────────────────────────
+    // Token Errors
     /// Token store is full (max 256 tokens).
     TokenStoreExhausted { store: &'static str },
 
-    // ─── Value Errors ────────────────────────────────────────
+    // Value Errors
     /// Value exceeds maximum size.
     ValueTooLarge { max_bytes: usize },
 
-    // ─── Database Errors ─────────────────────────────────────
+    // Database Errors
     /// Database is already open by another process.
     DatabaseLocked(PathBuf),
 

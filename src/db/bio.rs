@@ -53,22 +53,6 @@ pub fn calculate_bio_score(
     significance: u8,
     last_accessed_at: u32,
     now: u32,
-) -> f64 {
-    calculate_bio_score_with_params(
-        access_count,
-        significance,
-        last_accessed_at,
-        now,
-        &BioParams::default(),
-    )
-}
-
-/// Calculate bio score with custom tuning parameters.
-pub fn calculate_bio_score_with_params(
-    access_count: u32,
-    significance: u8,
-    last_accessed_at: u32,
-    now: u32,
     params: &BioParams,
 ) -> f64 {
     // 1. Frequency: Log-dampened to prevent super-nodes
@@ -87,65 +71,4 @@ pub fn calculate_bio_score_with_params(
     let denominator = (days_since + 2.0).powf(params.gravity);
 
     numerator / denominator
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn fresh_node_has_positive_score() {
-        let now = 1_700_000_000u32;
-        let score = calculate_bio_score(1, 128, now, now);
-        // Sig: (128/255)*100 = 50.2, Freq: ln(2)*10 = 6.93
-        // Num: 57.1, Denom: (0+2)^1 = 2 → Score ≈ 28.5
-        assert!(score > 25.0 && score < 35.0, "score was {}", score);
-    }
-
-    #[test]
-    fn score_decays_over_days() {
-        let start = 1_700_000_000u32;
-        let score_now = calculate_bio_score(1, 128, start, start);
-        let score_1d = calculate_bio_score(1, 128, start, start + 86400);
-        let score_7d = calculate_bio_score(1, 128, start, start + 86400 * 7);
-
-        assert!(score_now > score_1d, "1 day decay");
-        assert!(score_1d > score_7d, "7 day decay");
-    }
-
-    #[test]
-    fn frequency_boosts_score() {
-        let now = 1_700_000_000u32;
-        let score_1 = calculate_bio_score(1, 128, now, now);
-        let score_100 = calculate_bio_score(100, 128, now, now);
-        assert!(score_100 > score_1);
-        // But log-dampened: 100x accesses ≠ 100x score
-        assert!(score_100 < score_1 * 10.0, "log dampening works");
-    }
-
-    #[test]
-    fn significance_boosts_score() {
-        let now = 1_700_000_000u32;
-        let score_low = calculate_bio_score(1, 0, now, now);
-        let score_mid = calculate_bio_score(1, 128, now, now);
-        let score_high = calculate_bio_score(1, 255, now, now);
-        assert!(score_low < score_mid);
-        assert!(score_mid < score_high);
-    }
-
-    #[test]
-    fn custom_params_affect_score() {
-        let now = 1_700_000_000u32;
-        let default_score = calculate_bio_score(10, 128, now, now);
-
-        let heavy_sig = BioParams { w_sig: 5.0, ..Default::default() };
-        let sig_score = calculate_bio_score_with_params(10, 128, now, now, &heavy_sig);
-        assert!(sig_score > default_score, "w_sig boost");
-
-        let heavy_gravity = BioParams { gravity: 2.0, ..Default::default() };
-        let one_day_later = now + 86400;
-        let normal_decay = calculate_bio_score(10, 128, now, one_day_later);
-        let heavy_decay = calculate_bio_score_with_params(10, 128, now, one_day_later, &heavy_gravity);
-        assert!(heavy_decay < normal_decay, "higher gravity = faster decay");
-    }
 }

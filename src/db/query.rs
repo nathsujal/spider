@@ -1,4 +1,4 @@
-//! Query & retrieval operations for SpiderDB.
+//! Query & retrieval operations for Spider.
 //!
 //! Retrieval:
 //! - `get_all_node_properties` / `get_all_rel_properties` — bulk property retrieval
@@ -8,12 +8,10 @@
 
 use std::collections::HashMap;
 
-use crate::db::{DbError, Result, SpiderDB};
+use crate::db::{DbError, Result, Spider};
 use crate::db::property::PropertyValue;
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Direction enum
-// ─────────────────────────────────────────────────────────────────────────────
 
 /// Relationship traversal direction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,9 +24,7 @@ pub enum Direction {
     Both,
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // RelInfo — rich relationship descriptor
-// ─────────────────────────────────────────────────────────────────────────────
 
 /// A relationship with its metadata resolved to human-readable form.
 #[derive(Debug, Clone, PartialEq)]
@@ -39,12 +35,10 @@ pub struct RelInfo {
     pub rel_type: String,
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// SpiderDB Query Methods
-// ─────────────────────────────────────────────────────────────────────────────
+// Spider Query Methods
 
-impl SpiderDB {
-    // ─── Property Collection ────────────────────────────────────────────────
+impl Spider {
+    // Property Collection
 
     /// Get all properties of a node as a key-value map.
     ///
@@ -109,7 +103,7 @@ impl SpiderDB {
         Ok(map)
     }
 
-    // ─── Relationship Traversal ─────────────────────────────────────────────
+    // Relationship Traversal
 
     /// Get relationships for a node, filtered by direction and optional type.
     ///
@@ -207,7 +201,7 @@ impl SpiderDB {
             .map(|s| s.to_string()))
     }
 
-    // ─── Label Scan ─────────────────────────────────────────────────────────
+    // Label Scan
 
     /// Find all node IDs that have the given label.
     ///
@@ -260,21 +254,19 @@ impl SpiderDB {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Tests
-// ─────────────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use tempfile::tempdir;
 
-    // ─── Property Collection ────────────────────────────────────────────────
+    // Property Collection
 
     #[test]
     fn get_all_props_empty_node() {
         let dir = tempdir().unwrap();
-        let mut db = SpiderDB::open(dir.path()).unwrap();
+        let mut db = Spider::open(dir.path()).unwrap();
         let id = db.create_node(&["Person"]).unwrap();
         let props = db.get_all_node_properties(id).unwrap();
         assert!(props.is_empty());
@@ -283,7 +275,7 @@ mod tests {
     #[test]
     fn get_all_props_mixed() {
         let dir = tempdir().unwrap();
-        let mut db = SpiderDB::open(dir.path()).unwrap();
+        let mut db = Spider::open(dir.path()).unwrap();
         let id = db.create_node(&["Person"]).unwrap();
 
         db.set_node_property(id, "name", PropertyValue::String("Alice".into())).unwrap();
@@ -300,7 +292,7 @@ mod tests {
     #[test]
     fn get_all_props_with_dynamic_string() {
         let dir = tempdir().unwrap();
-        let mut db = SpiderDB::open(dir.path()).unwrap();
+        let mut db = Spider::open(dir.path()).unwrap();
         let id = db.create_node(&["Doc"]).unwrap();
 
         db.set_node_property(id, "title", PropertyValue::String("A Long Title Here".into())).unwrap();
@@ -314,7 +306,7 @@ mod tests {
     #[test]
     fn get_all_rel_props() {
         let dir = tempdir().unwrap();
-        let mut db = SpiderDB::open(dir.path()).unwrap();
+        let mut db = Spider::open(dir.path()).unwrap();
         let a = db.create_node(&["Person"]).unwrap();
         let b = db.create_node(&["Person"]).unwrap();
         let r = db.create_rel(a, b, "KNOWS").unwrap();
@@ -328,12 +320,12 @@ mod tests {
         assert_eq!(props["weight"], PropertyValue::Float(0.9));
     }
 
-    // ─── Relationship Traversal ─────────────────────────────────────────────
+    // Relationship Traversal
 
     #[test]
     fn get_rels_outgoing() {
         let dir = tempdir().unwrap();
-        let mut db = SpiderDB::open(dir.path()).unwrap();
+        let mut db = Spider::open(dir.path()).unwrap();
         let a = db.create_node(&["Person"]).unwrap();
         let b = db.create_node(&["Person"]).unwrap();
         let c = db.create_node(&["Person"]).unwrap();
@@ -349,7 +341,7 @@ mod tests {
     #[test]
     fn get_rels_incoming() {
         let dir = tempdir().unwrap();
-        let mut db = SpiderDB::open(dir.path()).unwrap();
+        let mut db = Spider::open(dir.path()).unwrap();
         let a = db.create_node(&["Person"]).unwrap();
         let b = db.create_node(&["Person"]).unwrap();
         db.create_rel(b, a, "FOLLOWS").unwrap();
@@ -364,7 +356,7 @@ mod tests {
     #[test]
     fn get_rels_both() {
         let dir = tempdir().unwrap();
-        let mut db = SpiderDB::open(dir.path()).unwrap();
+        let mut db = Spider::open(dir.path()).unwrap();
         let a = db.create_node(&["Person"]).unwrap();
         let b = db.create_node(&["Person"]).unwrap();
         db.create_rel(a, b, "KNOWS").unwrap();
@@ -377,7 +369,7 @@ mod tests {
     #[test]
     fn get_rels_type_filter() {
         let dir = tempdir().unwrap();
-        let mut db = SpiderDB::open(dir.path()).unwrap();
+        let mut db = Spider::open(dir.path()).unwrap();
         let a = db.create_node(&["Person"]).unwrap();
         let b = db.create_node(&["Person"]).unwrap();
         let c = db.create_node(&["Person"]).unwrap();
@@ -393,7 +385,7 @@ mod tests {
     #[test]
     fn get_rels_nonexistent_type() {
         let dir = tempdir().unwrap();
-        let mut db = SpiderDB::open(dir.path()).unwrap();
+        let mut db = Spider::open(dir.path()).unwrap();
         let a = db.create_node(&["Person"]).unwrap();
         let b = db.create_node(&["Person"]).unwrap();
         db.create_rel(a, b, "KNOWS").unwrap();
@@ -405,7 +397,7 @@ mod tests {
     #[test]
     fn rel_type_name() {
         let dir = tempdir().unwrap();
-        let mut db = SpiderDB::open(dir.path()).unwrap();
+        let mut db = Spider::open(dir.path()).unwrap();
         let a = db.create_node(&["Person"]).unwrap();
         let b = db.create_node(&["Person"]).unwrap();
         let r = db.create_rel(a, b, "KNOWS").unwrap();
@@ -413,12 +405,12 @@ mod tests {
         assert_eq!(db.get_rel_type_name(r).unwrap(), Some("KNOWS".to_string()));
     }
 
-    // ─── Label Scan ─────────────────────────────────────────────────────────
+    // Label Scan
 
     #[test]
     fn find_by_label() {
         let dir = tempdir().unwrap();
-        let mut db = SpiderDB::open(dir.path()).unwrap();
+        let mut db = Spider::open(dir.path()).unwrap();
         let p1 = db.create_node(&["Person"]).unwrap();
         let p2 = db.create_node(&["Person"]).unwrap();
         let _d = db.create_node(&["Document"]).unwrap();
@@ -432,19 +424,19 @@ mod tests {
     #[test]
     fn find_by_label_empty() {
         let dir = tempdir().unwrap();
-        let mut db = SpiderDB::open(dir.path()).unwrap();
+        let mut db = Spider::open(dir.path()).unwrap();
         db.create_node(&["Person"]).unwrap();
 
         let found = db.find_nodes_by_label("NonExistent").unwrap();
         assert!(found.is_empty());
     }
 
-    // ─── Property Scan ──────────────────────────────────────────────────────
+    // Property Scan
 
     #[test]
     fn find_by_property() {
         let dir = tempdir().unwrap();
-        let mut db = SpiderDB::open(dir.path()).unwrap();
+        let mut db = Spider::open(dir.path()).unwrap();
         let a = db.create_node(&["Person"]).unwrap();
         let b = db.create_node(&["Person"]).unwrap();
         let c = db.create_node(&["Person"]).unwrap();
@@ -462,7 +454,7 @@ mod tests {
     #[test]
     fn find_by_property_no_match() {
         let dir = tempdir().unwrap();
-        let mut db = SpiderDB::open(dir.path()).unwrap();
+        let mut db = Spider::open(dir.path()).unwrap();
         let a = db.create_node(&["Person"]).unwrap();
         db.set_node_property(a, "age", PropertyValue::Int(30)).unwrap();
 
@@ -470,12 +462,12 @@ mod tests {
         assert!(found.is_empty());
     }
 
-    // ─── Complex Traversal ──────────────────────────────────────────────────
+    // Complex Traversal
 
     #[test]
     fn social_graph_traversal() {
         let dir = tempdir().unwrap();
-        let mut db = SpiderDB::open(dir.path()).unwrap();
+        let mut db = Spider::open(dir.path()).unwrap();
 
         // Build: Alice -KNOWS-> Bob -KNOWS-> Carol
         //        Alice -LIKES-> Carol

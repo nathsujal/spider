@@ -1,14 +1,12 @@
-//! Property operations for SpiderDB.
+//! Property operations for Spider.
 //!
 //! Provides `PropertyValue` enum and methods to set/get/delete
 //! properties on nodes and relationships.
 
-use crate::db::{DbError, Result, SpiderDB};
+use crate::db::{DbError, Result, Spider};
 use crate::schema::{DynamicStringRecord, PropertyBlock, PropertyRecord, PropertyType};
 
-// ─────────────────────────────────────────────────────────────────────────────
 // PropertyValue
-// ─────────────────────────────────────────────────────────────────────────────
 
 /// High-level property value that maps to storage types.
 ///
@@ -35,12 +33,10 @@ impl std::fmt::Display for PropertyValue {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// SpiderDB Property Methods
-// ─────────────────────────────────────────────────────────────────────────────
+// Spider Property Methods
 
-impl SpiderDB {
-    // ─── Node Properties ─────────────────────────────────────────────────────
+impl Spider {
+    // Node Properties
 
     /// Set a property on a node.
     ///
@@ -132,7 +128,7 @@ impl SpiderDB {
         self.clear_property(node.first_prop_id, key_id)
     }
 
-    // ─── Relationship Properties ─────────────────────────────────────────────
+    // Relationship Properties
 
     /// Set a property on a relationship.
     pub fn set_rel_property(
@@ -211,7 +207,7 @@ impl SpiderDB {
         self.clear_property(rel.first_prop_id, key_id)
     }
 
-    // ─── Internal Helpers ────────────────────────────────────────────────────
+    // Internal Helpers
 
     /// Encode a PropertyValue into a PropertyBlock.
     ///
@@ -341,7 +337,7 @@ impl SpiderDB {
         Ok(())
     }
 
-    // ─── Dynamic String Helpers ──────────────────────────────────────────────
+    // Dynamic String Helpers
 
     /// Write a string to `strings.db`, returning the first record ID.
     fn write_dynamic_string(&mut self, s: &str) -> Result<u32> {
@@ -463,9 +459,7 @@ impl SpiderDB {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Tests
-// ─────────────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -475,7 +469,7 @@ mod tests {
     #[test]
     fn set_and_get_bool() {
         let dir = tempdir().unwrap();
-        let mut db = SpiderDB::open(dir.path()).unwrap();
+        let mut db = Spider::open(dir.path()).unwrap();
         let id = db.create_node(&["Person"]).unwrap();
         db.set_node_property(id, "active", PropertyValue::Bool(true)).unwrap();
         assert_eq!(db.get_node_property(id, "active").unwrap(), Some(PropertyValue::Bool(true)));
@@ -484,7 +478,7 @@ mod tests {
     #[test]
     fn set_and_get_int() {
         let dir = tempdir().unwrap();
-        let mut db = SpiderDB::open(dir.path()).unwrap();
+        let mut db = Spider::open(dir.path()).unwrap();
         let id = db.create_node(&["Person"]).unwrap();
         db.set_node_property(id, "age", PropertyValue::Int(30)).unwrap();
         assert_eq!(db.get_node_property(id, "age").unwrap(), Some(PropertyValue::Int(30)));
@@ -493,7 +487,7 @@ mod tests {
     #[test]
     fn set_and_get_negative_int() {
         let dir = tempdir().unwrap();
-        let mut db = SpiderDB::open(dir.path()).unwrap();
+        let mut db = Spider::open(dir.path()).unwrap();
         let id = db.create_node(&["Account"]).unwrap();
         db.set_node_property(id, "balance", PropertyValue::Int(-500)).unwrap();
         assert_eq!(db.get_node_property(id, "balance").unwrap(), Some(PropertyValue::Int(-500)));
@@ -502,7 +496,7 @@ mod tests {
     #[test]
     fn set_and_get_float() {
         let dir = tempdir().unwrap();
-        let mut db = SpiderDB::open(dir.path()).unwrap();
+        let mut db = Spider::open(dir.path()).unwrap();
         let id = db.create_node(&["Sensor"]).unwrap();
         db.set_node_property(id, "temp", PropertyValue::Float(36.5)).unwrap();
         assert_eq!(db.get_node_property(id, "temp").unwrap(), Some(PropertyValue::Float(36.5)));
@@ -511,7 +505,7 @@ mod tests {
     #[test]
     fn update_existing_property() {
         let dir = tempdir().unwrap();
-        let mut db = SpiderDB::open(dir.path()).unwrap();
+        let mut db = Spider::open(dir.path()).unwrap();
         let id = db.create_node(&["Person"]).unwrap();
         db.set_node_property(id, "score", PropertyValue::Int(10)).unwrap();
         db.set_node_property(id, "score", PropertyValue::Int(99)).unwrap();
@@ -521,7 +515,7 @@ mod tests {
     #[test]
     fn delete_property() {
         let dir = tempdir().unwrap();
-        let mut db = SpiderDB::open(dir.path()).unwrap();
+        let mut db = Spider::open(dir.path()).unwrap();
         let id = db.create_node(&["Person"]).unwrap();
         db.set_node_property(id, "age", PropertyValue::Int(25)).unwrap();
         db.delete_node_property(id, "age").unwrap();
@@ -531,7 +525,7 @@ mod tests {
     #[test]
     fn get_nonexistent_property() {
         let dir = tempdir().unwrap();
-        let mut db = SpiderDB::open(dir.path()).unwrap();
+        let mut db = Spider::open(dir.path()).unwrap();
         let id = db.create_node(&["Person"]).unwrap();
         assert_eq!(db.get_node_property(id, "missing").unwrap(), None);
     }
@@ -539,7 +533,7 @@ mod tests {
     #[test]
     fn multiple_properties_on_node() {
         let dir = tempdir().unwrap();
-        let mut db = SpiderDB::open(dir.path()).unwrap();
+        let mut db = Spider::open(dir.path()).unwrap();
         let id = db.create_node(&["Person"]).unwrap();
         db.set_node_property(id, "active", PropertyValue::Bool(true)).unwrap();
         db.set_node_property(id, "age", PropertyValue::Int(30)).unwrap();
@@ -552,7 +546,7 @@ mod tests {
     #[test]
     fn overflow_to_second_record() {
         let dir = tempdir().unwrap();
-        let mut db = SpiderDB::open(dir.path()).unwrap();
+        let mut db = Spider::open(dir.path()).unwrap();
         let id = db.create_node(&["Thing"]).unwrap();
         db.set_node_property(id, "a", PropertyValue::Int(1)).unwrap();
         db.set_node_property(id, "b", PropertyValue::Int(2)).unwrap();
@@ -566,7 +560,7 @@ mod tests {
     #[test]
     fn rel_properties() {
         let dir = tempdir().unwrap();
-        let mut db = SpiderDB::open(dir.path()).unwrap();
+        let mut db = Spider::open(dir.path()).unwrap();
         let a = db.create_node(&["Person"]).unwrap();
         let b = db.create_node(&["Person"]).unwrap();
         let rel = db.create_rel(a, b, "KNOWS").unwrap();
@@ -581,7 +575,7 @@ mod tests {
     #[test]
     fn int_too_large_error() {
         let dir = tempdir().unwrap();
-        let mut db = SpiderDB::open(dir.path()).unwrap();
+        let mut db = Spider::open(dir.path()).unwrap();
         let id = db.create_node(&["Big"]).unwrap();
         let result = db.set_node_property(id, "big", PropertyValue::Int(i64::MAX));
         assert!(result.is_err());
@@ -591,23 +585,23 @@ mod tests {
     fn persist_properties() {
         let dir = tempdir().unwrap();
         {
-            let mut db = SpiderDB::open(dir.path()).unwrap();
+            let mut db = Spider::open(dir.path()).unwrap();
             let id = db.create_node(&["Person"]).unwrap();
             db.set_node_property(id, "age", PropertyValue::Int(42)).unwrap();
             db.close().unwrap();
         }
         {
-            let db = SpiderDB::open(dir.path()).unwrap();
+            let db = Spider::open(dir.path()).unwrap();
             assert_eq!(db.get_node_property(1, "age").unwrap(), Some(PropertyValue::Int(42)));
         }
     }
 
-    // ─── String Tests ────────────────────────────────────────────────────────
+    // String Tests
 
     #[test]
     fn short_string_inline() {
         let dir = tempdir().unwrap();
-        let mut db = SpiderDB::open(dir.path()).unwrap();
+        let mut db = Spider::open(dir.path()).unwrap();
         let id = db.create_node(&["Person"]).unwrap();
 
         // "en" is 2 bytes → stored inline as ShortString
@@ -621,7 +615,7 @@ mod tests {
     #[test]
     fn short_string_max() {
         let dir = tempdir().unwrap();
-        let mut db = SpiderDB::open(dir.path()).unwrap();
+        let mut db = Spider::open(dir.path()).unwrap();
         let id = db.create_node(&["Person"]).unwrap();
 
         // Exactly 6 bytes → still inline
@@ -635,7 +629,7 @@ mod tests {
     #[test]
     fn long_string_dynamic() {
         let dir = tempdir().unwrap();
-        let mut db = SpiderDB::open(dir.path()).unwrap();
+        let mut db = Spider::open(dir.path()).unwrap();
         let id = db.create_node(&["Person"]).unwrap();
 
         // 13 bytes → stored in strings.db
@@ -650,7 +644,7 @@ mod tests {
     #[test]
     fn very_long_string_multi_block() {
         let dir = tempdir().unwrap();
-        let mut db = SpiderDB::open(dir.path()).unwrap();
+        let mut db = Spider::open(dir.path()).unwrap();
         let id = db.create_node(&["Doc"]).unwrap();
 
         // 300 bytes → spans 3 DynamicStringRecords (120 bytes each)
@@ -665,7 +659,7 @@ mod tests {
     #[test]
     fn update_string_property() {
         let dir = tempdir().unwrap();
-        let mut db = SpiderDB::open(dir.path()).unwrap();
+        let mut db = Spider::open(dir.path()).unwrap();
         let id = db.create_node(&["Person"]).unwrap();
 
         db.set_node_property(id, "name", PropertyValue::String("Old Name Here".into())).unwrap();
@@ -679,7 +673,7 @@ mod tests {
     #[test]
     fn delete_dynamic_string() {
         let dir = tempdir().unwrap();
-        let mut db = SpiderDB::open(dir.path()).unwrap();
+        let mut db = Spider::open(dir.path()).unwrap();
         let id = db.create_node(&["Person"]).unwrap();
 
         db.set_node_property(id, "bio", PropertyValue::String("A long biography text".into())).unwrap();
@@ -690,7 +684,7 @@ mod tests {
     #[test]
     fn empty_string() {
         let dir = tempdir().unwrap();
-        let mut db = SpiderDB::open(dir.path()).unwrap();
+        let mut db = Spider::open(dir.path()).unwrap();
         let id = db.create_node(&["Person"]).unwrap();
 
         db.set_node_property(id, "note", PropertyValue::String("".into())).unwrap();
@@ -703,7 +697,7 @@ mod tests {
     #[test]
     fn mixed_property_types() {
         let dir = tempdir().unwrap();
-        let mut db = SpiderDB::open(dir.path()).unwrap();
+        let mut db = Spider::open(dir.path()).unwrap();
         let id = db.create_node(&["Person"]).unwrap();
 
         db.set_node_property(id, "name", PropertyValue::String("Alice Wonderland".into())).unwrap();
@@ -721,14 +715,14 @@ mod tests {
     fn persist_string_properties() {
         let dir = tempdir().unwrap();
         {
-            let mut db = SpiderDB::open(dir.path()).unwrap();
+            let mut db = Spider::open(dir.path()).unwrap();
             let id = db.create_node(&["Person"]).unwrap();
             db.set_node_property(id, "name", PropertyValue::String("Alice Wonderland".into())).unwrap();
             db.set_node_property(id, "tag", PropertyValue::String("hi".into())).unwrap();
             db.close().unwrap();
         }
         {
-            let db = SpiderDB::open(dir.path()).unwrap();
+            let db = Spider::open(dir.path()).unwrap();
             assert_eq!(db.get_node_property(1, "name").unwrap(), Some(PropertyValue::String("Alice Wonderland".into())));
             assert_eq!(db.get_node_property(1, "tag").unwrap(), Some(PropertyValue::String("hi".into())));
         }

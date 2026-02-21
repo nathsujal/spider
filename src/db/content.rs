@@ -1,4 +1,4 @@
-//! Content-addressed blob storage for SpiderDB.
+//! Content-addressed blob storage for Spider.
 //!
 //! Stores binary data (images, audio, PDFs, etc.) as files keyed by
 //! SHA256 hash, with 2-char prefix directories (like Git objects).
@@ -12,10 +12,6 @@ use std::path::{Path, PathBuf};
 
 /// Default max blob size: 100 MB.
 pub const DEFAULT_MAX_BLOB_SIZE: u64 = 100 * 1024 * 1024;
-
-// ─────────────────────────────────────────────────────────────────────────────
-// MIME Detection
-// ─────────────────────────────────────────────────────────────────────────────
 
 /// Detect MIME type from magic bytes (file signature).
 fn detect_mime_from_bytes(data: &[u8]) -> Option<&'static str> {
@@ -125,9 +121,6 @@ fn ext_for_mime(mime: &str) -> &'static str {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Blob Metadata & Manifest
-// ─────────────────────────────────────────────────────────────────────────────
 
 /// Metadata for a single stored blob.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -177,9 +170,6 @@ impl BlobManifest {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ContentStore
-// ─────────────────────────────────────────────────────────────────────────────
 
 /// Content-addressed blob store.
 pub struct ContentStore {
@@ -311,9 +301,75 @@ impl ContentStore {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Tests
-// ─────────────────────────────────────────────────────────────────────────────
+
+use super::*;
+
+impl Spider {
+    pub fn file(
+        &mut self,
+        data: &[u8],
+        name: &str,
+        labels: &[&str],
+    ) -> Result<u32> {
+        // Store blob (dedup by hash)
+        let (hash, mime_type) = self.content.store(data, name)?;
+
+        // Create graph node
+        let node_id = self.create_node(labels)?;
+
+        // Set properties
+        self.set_node_property(node_id, "blob_ref", PropertyValue::String(hash.clone()))?;
+        self.set_node_property(node_id, "mime_type", PropertyValue::String(mime_type))?;
+        self.set_node_property(node_id, "name", PropertyValue::String(name.to_string()))?;
+        self.set_node_property(node_id, "size", PropertyValue::Int(data.len() as i64))?;
+
+        Ok(node_id)
+    }
+
+    pub fn read_file(
+        &self,
+        node_id: u32,
+    ) -> Result<Vec<u8>> {
+        match self.get_node_property(node_id, "blob_ref")? {
+            Some(PropertyValue::String(hash)) => {
+                Ok(self.content.read(&hash)?)
+            }
+            _ => Err(DbError::Corrupted(
+                format!("Node {} has no blob_ref property", node_id)
+            )),
+        }
+    }
+
+    pub fn delete_file_node(
+        &mut self,
+        node_id: u32,
+    ) -> Result<()> {
+        // Get hash before deleting
+        let hash = match self.get_node_property(node_id, "blob_ref")? {
+            Some(PropertyValue::String(hash)) => Some(hash),
+            _ => None,
+        };
+
+        // Decrement ref count
+        if let Some(hash) = hash {
+            self.content.remove_ref(&hash);
+        }
+
+        // Cascade delete node
+        self.delete_node(node_id)
+    }
+
+    /// Get content store stats: (blob_count, total_bytes)
+    pub fn file_stats(&self) -> (usize, u64) {
+        (self.content.blob_count(), self.content.total_size())
+    }
+
+    /// Garbage collect unreferenced blobs. Retruns count removed.
+    pub fn gc_files(&mut self) -> Result<usize> {
+        Ok(self.content.gc()?)
+    }
+}
+
 
 #[cfg(test)]
 mod tests {
