@@ -2,7 +2,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from spider import PySpiderDB
+from spider import PySpider
 from . import router
 from python.core.graph import GraphBuilder
 from python.intelligence.chunker import Chunker
@@ -26,7 +26,7 @@ class Spider:
 
     def __init__(
         self,
-        db_path: str = "./spider.db",
+        db_path: str | None = None,
         *,
         chunk_size: int = 512,
         extract: bool = True,
@@ -34,15 +34,16 @@ class Spider:
     ):
         """
         Initialize the Spider knowledge graph.
+        If `db_path` is None, connects to the universal global database layout.
 
         Args:
-            db_path: Path to the RocksDB/SpiderDB folder.
+            db_path: Optional path to the Spider folder.
             chunk_size: Token size for chunking documents.
             extract: If True, uses SLM to extract propositions.
             slm: Optional custom SLM client (defaults to Ollama).
         """
         self.db_path = db_path
-        self._db = PySpiderDB(db_path)
+        self._db = PySpider(db_path)
         self._graph = GraphBuilder(self._db)
         
         self._chunker = Chunker(chunk_size=chunk_size)
@@ -101,7 +102,7 @@ class Spider:
         """Return basic database statistics."""
         return {
             "node_count": self._db.node_count(),
-            # "content_store": self._db.content_stats(), # TODO: expose in PySpiderDB if needed
+            # "content_store": self._db.content_stats(), # TODO: expose in PySpider if needed
             "path": self.db_path,
         }
 

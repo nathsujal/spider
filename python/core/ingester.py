@@ -1,7 +1,7 @@
 # """
-# Ingester: orchestrates the full pipeline from source file to SpiderDB graph.
+# Ingester: orchestrates the full pipeline from source file to Spider graph.
 
-# Flow: Source → Loader → Document → Chunker → Chunks → SLM → Propositions → SpiderDB
+# Flow: Source → Loader → Document → Chunker → Chunks → SLM → Propositions → Spider
 
 # Chunks are intermediate (not stored). Only DOCUMENT, SECTION, and
 # PROPOSITION nodes are written to the graph.
@@ -10,9 +10,9 @@
 # import hashlib
 
 # try:
-#     from python._spider import PySpiderDB
+#     from python._spider import PySpider
 # except ImportError:
-#     PySpiderDB = None  # Rust bindings not built yet
+#     PySpider = None  # Rust bindings not built yet
 # from python.ingest.base import Chunk, Document, Proposition, Section
 # from python.ingest.pdf import PDFLoader
 # from python.intelligence.chunker import Chunker
@@ -25,14 +25,14 @@
 #     End-to-end ingestion pipeline for Spider.
 
 #     Usage:
-#         db = PySpiderDB("./memory.db")
+#         db = PySpider("./memory.db")
 #         ingester = Ingester(db)
 #         ingester.ingest("paper.pdf")
 #     """
 
 #     def __init__(
 #         self,
-#         db: PySpiderDB,
+#         db: PySpider,
 #         *,
 #         slm: OllamaClient | None = None,
 #         chunk_size: int = 512,
@@ -44,7 +44,7 @@
 
 #     def ingest(self, source: str) -> dict:
 #         """
-#         Ingest a source file into SpiderDB.
+#         Ingest a source file into Spider.
 
 #         Returns a summary dict with node counts and IDs.
 #         """
@@ -68,14 +68,14 @@
 #             print(f"[3/4] SLM not available — skipping proposition extraction")
 
 #         # ── Step 4: Write to graph ────────────────────────────────────
-#         print(f"[4/4] Writing to SpiderDB...")
+#         print(f"[4/4] Writing to Spider...")
 #         result = self._build_graph(doc, chunks, props)
 #         print(f"       Done. {result['total_nodes']} nodes, {result['total_rels']} relationships")
 
 #         return result
 
 #     def _build_graph(self, doc: Document, chunks: list[Chunk], props: list[Proposition]) -> dict:
-#         """Map the processed document into SpiderDB nodes and relationships."""
+#         """Map the processed document into Spider nodes and relationships."""
 
 #         stats = {"doc_id": 0, "section_ids": [], "prop_ids": [], "total_nodes": 0, "total_rels": 0}
 
@@ -159,7 +159,7 @@
 #     db_path = tempfile.mkdtemp(prefix="spider_test_")
 #     print(f"Test DB: {db_path}\n")
 
-#     db = PySpiderDB(db_path)
+#     db = PySpider(db_path)
 #     ingester = Ingester(db)
 #     result = ingester.ingest(source)
 

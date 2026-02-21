@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 @dataclass
 class Chunk:
-    """Atomic text unit for storage in SpiderDB."""
+    """Atomic text unit for storage in Spider."""
 
     text: str
     index: int              # global position in document (0-based)

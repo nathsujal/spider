@@ -1,7 +1,7 @@
 import logging
 from typing import Any
 
-from spider import PySpiderDB
+from spider import Spider
 from python.models import Document, Proposition
 
 logger = logging.getLogger(__name__)
@@ -21,7 +21,7 @@ class GraphBuilder:
        └─ Properties: source, title, content_hash, etc.
     """
 
-    def __init__(self, db: PySpiderDB):
+    def __init__(self, db: Spider):
         self.db = db
 
     def has_document(self, content_hash: str) -> bool:

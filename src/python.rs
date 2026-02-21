@@ -88,7 +88,7 @@ impl Memory {
             id: n.id,
             labels: n.get_labels(),
             access_count: n.access_count,
-            importance: n.significance,
+            significance: n.significance,
             created_at: n.created_at,
             last_accessed_at: n.last_accessed_at,
         }))
@@ -384,8 +384,8 @@ pub struct Node {
 impl Node {
     fn __repr__(&self) -> String {
         format!(
-            "Node(id={}, labels={:?}, access_count={}, importance={})",
-            self.id, self.labels, self.access_count, self.importance,
+            "Node(id={}, labels={:?}, access_count={}, significance={})",
+            self.id, self.labels, self.access_count, self.significance,
         )
     }
 }

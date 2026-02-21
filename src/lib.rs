@@ -2,6 +2,7 @@
 //!
 //! A context-aware graph database that behaves like a human brain.
 
+#[cfg(feature = "python")]
 use pyo3::prelude::*;
 
 // TODO: These modules need refactoring to use new schema
@@ -12,6 +13,7 @@ use pyo3::prelude::*;
 pub mod schema;
 pub mod store;
 pub mod db;
+#[cfg(feature = "python")]
 mod python;
 
 // Re-export schema types
@@ -26,6 +28,7 @@ pub use store::{RecordFile, FreeList, Metadata, Record, StoreError};
 // Re-export database types
 pub use db::{Spider, DbError};
 
+#[cfg(feature = "python")]
 #[pymodule]
 fn spider(m: &Bound<'_, PyModule>) -> PyResult<()> {
     python::register(m.py(), m)?;

@@ -8,7 +8,7 @@ from python.models import Chunk, Document, Section
 
 class Chunker:
     """
-    Splits a Document into contextual Chunks for storage in SpiderDB.
+    Splits a Document into contextual Chunks for storage in Spider.
 
     Strategy (recursive boundary-aware splitting):
       1. If document is short (< chunk_size tokens) → single chunk, no sections
