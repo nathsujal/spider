@@ -1,17 +1,36 @@
+//! Spider - Bio-Inspired AI Agent Memory Graph
+//!
+//! A context-aware graph database that behaves like a human brain.
+
+#[cfg(feature = "python")]
 use pyo3::prelude::*;
 
-pub mod bio;
+// TODO: These modules need refactoring to use new schema
+// pub mod bio;
+// pub mod cluster;
+// pub mod ranking;
+
+pub mod schema;
+pub mod store;
 pub mod db;
-pub mod search;
-pub mod storage;
-pub mod cluster;
-pub mod ranking;
+#[cfg(feature = "python")]
+mod python;
 
-use db::SpiderDB;
+// Re-export schema types
+pub use schema::{
+    NodeRecord, RelRecord, PropertyRecord, PropertyBlock, PropertyType,
+    DynamicStringRecord, DynamicArrayRecord, TokenStore,
+};
 
-/// A Python module implemented in Rust.
+// Re-export store types
+pub use store::{RecordFile, FreeList, Metadata, Record, StoreError};
+
+// Re-export database types
+pub use db::{Spider, DbError};
+
+#[cfg(feature = "python")]
 #[pymodule]
-fn spider(_py: Python, m: &PyModule) -> PyResult<()> {
-    m.add_class::<SpiderDB>()?;
+fn spider(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    python::register(m.py(), m)?;
     Ok(())
 }
