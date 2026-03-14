@@ -1,5 +1,38 @@
+# Build artifacts
 target/
-.venv
-test*.py
+Cargo.lock
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+*.so
+*.dylib
+
+# Spider database files
 *.db
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Testing
+test*.py
 lib/
+
+# Maturin
+*.whl
+
+# Claude
+.claude/
+ClAUDE.md
+
+# Planning
+.planning/

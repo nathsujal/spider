@@ -1,0 +1,34 @@
+[package]
+name = "spider-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Pure Rust database engine for Spider — bio-inspired AI agent memory graph"
+
+[lib]
+name = "spider_core"
+crate-type = ["rlib"]
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+bincode = { workspace = true }
+memmap2 = { workspace = true }
+sha2 = { workspace = true }
+anyhow = { workspace = true }
+rustc-hash = { workspace = true }
+tokio = { workspace = true, optional = true }
+
+# Optional dependencies for future features
+rayon = { version = "1.8", optional = true }
+
+[dev-dependencies]
+tempfile = "3.10"
+
+[features]
+default = []
+async = ["tokio"]
+parallel = ["rayon"]
