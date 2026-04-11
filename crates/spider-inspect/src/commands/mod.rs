@@ -5,8 +5,10 @@ use anyhow::Result;
 use crate::context::Context;
 
 mod bio;
+mod propositions;
 mod show;
 mod stats;
+mod trace;
 mod why_dead;
 
 /// Available REPL commands.
@@ -18,6 +20,8 @@ pub enum Command {
     Show,
     Bio,
     WhyDead,
+    Propositions,
+    Trace,
 }
 
 impl Command {
@@ -35,6 +39,8 @@ impl Command {
             "show" => Command::Show,
             "bio" => Command::Bio,
             "why-dead" => Command::WhyDead,
+            "propositions" | "props" => Command::Propositions,
+            "trace" => Command::Trace,
             _ => return None,
         };
         Some((cmd, parts[1..].to_vec()))
@@ -52,6 +58,8 @@ impl Command {
             Command::Show => show::run(ctx, args),
             Command::Bio => bio::run(ctx),
             Command::WhyDead => why_dead::run(ctx, args),
+            Command::Propositions => propositions::run(ctx, args),
+            Command::Trace => trace::run(ctx, args),
         }
     }
 }
@@ -73,6 +81,8 @@ Available commands:\n\
   show <id>        — Show full node detail\n\
   bio              — Vitality leaderboard\n\
   why-dead <id>    — Explain why a node has a low bio score\n\
+  props <doc_id>   — List propositions for a document\n\
+  trace <doc_id>   — Replay ingestion trace\n\
 "
     );
 }
