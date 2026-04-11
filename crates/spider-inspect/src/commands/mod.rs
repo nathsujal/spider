@@ -24,7 +24,10 @@ mod stats;
 mod trace;
 mod top_cmd;
 mod tree;
+mod validate_cmd;
 mod why_dead;
+mod hex_dump;
+mod schema_cmd;
 
 /// Available REPL commands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,6 +54,9 @@ pub enum Command {
     Find,
     Top,
     PrunePreview,
+    Schema,
+    Hex,
+    Validate,
 }
 
 impl Command {
@@ -102,6 +108,9 @@ impl Command {
             "find" => Command::Find,
             "top" => Command::Top,
             "prune-preview" => Command::PrunePreview,
+            "schema" => Command::Schema,
+            "hex" => Command::Hex,
+            "validate" => Command::Validate,
             _ => return None,
         };
 
@@ -150,6 +159,9 @@ impl Command {
             }
             Command::Top => Ok(top_cmd::run(ctx, args)),
             Command::PrunePreview => Ok(prune_preview::run(ctx)),
+            Command::Schema => Ok(schema_cmd::run(ctx)),
+            Command::Hex => hex_dump::run(ctx, args),
+            Command::Validate => Ok(validate_cmd::run(ctx)),
         }
     }
 }
@@ -189,6 +201,9 @@ Available commands:\n\
   find bio <min>         — List nodes with bio score above threshold\n\
   top [n]                — Show top N nodes by bio score (default 10)\n\
   prune-preview          — Show nodes that would be pruned (score ≤ 0)\n\
+  schema                 — Print on-disk record layout schemas\n\
+  hex <id>               — Hex dump of a node record with field annotations\n\
+  validate               — Strict integrity check (chains, pointers, tokens)\n\
 \n\
 Note: changes are persisted when you exit the REPL.\n\
 "
