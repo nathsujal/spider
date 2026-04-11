@@ -88,7 +88,7 @@ pub fn run(ctx: &mut Context) -> Result<Status> {
     if !labels.is_empty() {
         println!("  Labels:");
         for (tid, count) in &labels {
-            let name = output::resolve_label(&db.label_tokens, *tid);
+            let name = output::resolve_label(&mut db.label_tokens, *tid);
             println!("    {:<15} {}", name, count);
         }
     }

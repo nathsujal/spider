@@ -61,7 +61,7 @@ pub fn run(db_path: Option<PathBuf>) -> Result<()> {
 
         // Dispatch.
         match Command::parse(input) {
-            Some(cmd) => match cmd.execute(&mut ctx) {
+            Some((cmd, args)) => match cmd.execute(&mut ctx, &args) {
                 Ok(Status::Continue) => {}
                 Ok(Status::Quit) => {
                     println!("{}", "bye".dimmed());

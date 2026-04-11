@@ -37,7 +37,7 @@ pub fn table(headers: &[&str], rows: Vec<Vec<String>>) -> Table {
 }
 
 /// Resolves a label token ID to its name.
-pub fn resolve_label(tokens: &TokenStore, id: u8) -> String {
+pub fn resolve_label(tokens: &mut TokenStore, id: u8) -> String {
     TokenId::new(id)
         .ok()
         .and_then(|tid| tokens.get_name(tid).map(|s| s.to_string()))
@@ -46,7 +46,7 @@ pub fn resolve_label(tokens: &TokenStore, id: u8) -> String {
 
 /// Resolves an edge type token ID to its name.
 #[allow(dead_code)]
-pub fn resolve_edge_type(tokens: &TokenStore, id: u8) -> String {
+pub fn resolve_edge_type(tokens: &mut TokenStore, id: u8) -> String {
     TokenId::new(id)
         .ok()
         .and_then(|tid| tokens.get_name(tid).map(|s| s.to_string()))
