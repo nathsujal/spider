@@ -1,4 +1,38 @@
-//! Bio score: ((S × Ws × 100) + (F × Wf)) / (Δdays + 2)^G
+//! Bio-inspired vitality scoring for graph nodes.
+//!
+//! Every node in Spider has a **vitality score** that determines whether it is
+//! remembered or forgotten. The formula is inspired by the Ebbinghaus forgetting
+//! curve, with three factors:
+//!
+//! | Factor | What it means | Rust field |
+//! |---|---|---|
+//! | **Significance** | How important the node is (0.0–1.0) | `node.significance / 255.0` |
+//! | **Frequency** | How often the node was accessed (log-dampened) | `ln(1 + access_count) × 10` |
+//! | **Time decay** | How long since last access (power-law decay) | `(days + 2)^G` |
+//!
+//! ## Formula
+//!
+//! ```text
+//! Score = ((S × Ws × 100) + (F × Wf)) / (Δdays + 2)^G
+//!
+//! Where:
+//!   S          = significance (0.0–1.0, from u8 0–255)
+//!   F          = log-dampened frequency: ln(1 + access_count) × 10
+//!   Δdays      = days since last access
+//!   Ws, Wf, G  = tuning parameters from [`BioParams`]
+//! ```
+//!
+//! ## Tuning Parameters
+//!
+//! The three weights live in [`Metadata`](crate::db::lifecycle::Metadata) inside
+//! `meta.db` and survive restarts. A future RL agent can optimise them
+//! automatically.
+//!
+//! | Parameter | Default | Effect |
+//! |---|---|---|
+//! | `w_sig` | 3.0 | How much significance matters |
+//! | `w_freq` | 2.0 | How much access frequency matters |
+//! | `gravity` | 1.5 | How fast memories decay (higher = faster) |
 
 pub use crate::schema::node::Node;
 

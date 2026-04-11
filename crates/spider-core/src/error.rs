@@ -11,7 +11,7 @@
 //! - Schema errors wrapped, not flattened — caller can inspect the inner cause
 //! - I/O errors wrapped from `std::io::Error`
 //! - All variants carry enough context to produce a useful error message
-//! without the caller needing to know internal IDs or offsets
+//!   without the caller needing to know internal IDs or offsets
 
 use crate::schema::{
     node::NodeError,

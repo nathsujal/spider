@@ -126,6 +126,9 @@ impl<T: Record> RecordFile<T> {
     
     /// Appends records to file end.
     pub fn append(&mut self, records: &[T]) -> SpiderResult<()> {
+        use std::io::Seek as _;
+        // Seek to end before writing — other operations may have moved the position.
+        self.file.seek(std::io::SeekFrom::End(0))?;
         for rec in records { self.file.write_all(rec.to_bytes().as_ref())?; }
         Ok(())
     }
