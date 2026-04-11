@@ -13,11 +13,13 @@ mod create_edge;
 mod create_node;
 mod delete_edge;
 mod delete_node;
+mod graph_vis;
 mod export_cmd;
 mod propositions;
 mod show;
 mod stats;
 mod trace;
+mod tree;
 mod why_dead;
 
 /// Available REPL commands.
@@ -40,6 +42,8 @@ pub enum Command {
     DeleteEdge,
     Touch,
     Sig,
+    Tree,
+    Graph,
 }
 
 impl Command {
@@ -86,6 +90,8 @@ impl Command {
             }
             "touch" => Command::Touch,
             "sig" => Command::Sig,
+            "tree" => Command::Tree,
+            "graph" => Command::Graph,
             _ => return None,
         };
 
@@ -121,6 +127,8 @@ impl Command {
             Command::DeleteEdge => delete_edge::run(ctx, args),
             Command::Touch => cmd_touch::run(ctx, args),
             Command::Sig => cmd_sig::run(ctx, args),
+            Command::Tree => tree::run(ctx, args),
+            Command::Graph => graph_vis::run(ctx, args),
         }
     }
 }
@@ -153,6 +161,8 @@ Available commands:\n\
   delete edge <id>       — Soft-delete an edge\n\
   touch <id>             — Increment access count (affects bio score)\n\
   sig <id> <0-255>       — Set node significance, prints new bio score\n\
+  tree <doc_id>          — Print tree of document → propositions → entities\n\
+  graph <id> [depth]     — Render neighborhood subgraph (default depth=2)\n\
 \n\
 Note: changes are persisted when you exit the REPL.\n\
 "
