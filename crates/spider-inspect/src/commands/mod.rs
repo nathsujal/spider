@@ -3,6 +3,7 @@
 use anyhow::Result;
 
 use crate::context::Context;
+use crate::output;
 
 mod bio;
 mod broken;
@@ -13,12 +14,15 @@ mod create_edge;
 mod create_node;
 mod delete_edge;
 mod delete_node;
+mod find_cmd;
 mod graph_vis;
 mod export_cmd;
 mod propositions;
+mod prune_preview;
 mod show;
 mod stats;
 mod trace;
+mod top_cmd;
 mod tree;
 mod why_dead;
 
@@ -44,6 +48,9 @@ pub enum Command {
     Sig,
     Tree,
     Graph,
+    Find,
+    Top,
+    PrunePreview,
 }
 
 impl Command {
@@ -92,6 +99,9 @@ impl Command {
             "sig" => Command::Sig,
             "tree" => Command::Tree,
             "graph" => Command::Graph,
+            "find" => Command::Find,
+            "top" => Command::Top,
+            "prune-preview" => Command::PrunePreview,
             _ => return None,
         };
 
@@ -129,6 +139,17 @@ impl Command {
             Command::Sig => cmd_sig::run(ctx, args),
             Command::Tree => tree::run(ctx, args),
             Command::Graph => graph_vis::run(ctx, args),
+            Command::Find => {
+                if args.is_empty() {
+                    output::print_error("usage: find [label|prop|bio] ...");
+                    Ok(Status::Continue)
+                } else {
+                    let sub = args[0];
+                    find_cmd::run(ctx, sub, &args[1..])
+                }
+            }
+            Command::Top => Ok(top_cmd::run(ctx, args)),
+            Command::PrunePreview => Ok(prune_preview::run(ctx)),
         }
     }
 }
@@ -163,6 +184,11 @@ Available commands:\n\
   sig <id> <0-255>       — Set node significance, prints new bio score\n\
   tree <doc_id>          — Print tree of document → propositions → entities\n\
   graph <id> [depth]     — Render neighborhood subgraph (default depth=2)\n\
+  find label <LABEL>     — List all nodes with a given label\n\
+  find prop <k> <v>      — List nodes with matching property\n\
+  find bio <min>         — List nodes with bio score above threshold\n\
+  top [n]                — Show top N nodes by bio score (default 10)\n\
+  prune-preview          — Show nodes that would be pruned (score ≤ 0)\n\
 \n\
 Note: changes are persisted when you exit the REPL.\n\
 "

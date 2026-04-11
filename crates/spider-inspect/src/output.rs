@@ -166,3 +166,39 @@ pub fn set_string_prop(
 
     Ok(())
 }
+
+/// Paginated table printer. Prints rows in pages of PAGE_SIZE, prompts "press enter for more".
+pub fn print_paged_table(headers: &[&str], rows: Vec<Vec<String>>) {
+    const PAGE_SIZE: usize = 20;
+
+    if rows.is_empty() {
+        println!("(no results)");
+        return;
+    }
+
+    let total = rows.len();
+    let mut shown = 0;
+
+    loop {
+        let end = (shown + PAGE_SIZE).min(total);
+        let page = &rows[shown..end];
+        println!("{}", table(headers, page.to_vec()));
+
+        shown = end;
+        if shown >= total {
+            break;
+        }
+
+        print!("\n  {} rows shown, {}/{} total — press Enter for more: ",
+            PAGE_SIZE, shown, total);
+        use std::io::Write;
+        let _ = std::io::stdout().flush();
+
+        let mut buf = String::new();
+        let _ = std::io::stdin().read_line(&mut buf);
+        if buf.trim().eq_ignore_ascii_case("q") {
+            println!("(cancelled)");
+            break;
+        }
+    }
+}
