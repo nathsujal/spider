@@ -1,9 +1,10 @@
 //! Command definitions and dispatch.
 
 use anyhow::Result;
-use colored::Colorize;
 
 use crate::context::Context;
+
+mod stats;
 
 /// Available REPL commands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,7 +33,7 @@ impl Command {
                 Ok(Status::Continue)
             }
             Command::Quit => Ok(Status::Quit),
-            Command::Stats => cmd_stats::run(ctx),
+            Command::Stats => stats::run(ctx),
         }
     }
 }
@@ -53,15 +54,4 @@ Available commands:\n\
   stats       — Show database overview\n\
 "
     );
-}
-
-// Placeholder implementations for future commands
-
-mod cmd_stats {
-    use super::*;
-
-    pub fn run(_ctx: &mut Context) -> Result<Status> {
-        println!("{}", "stats command — coming soon".yellow());
-        Ok(Status::Continue)
-    }
 }
