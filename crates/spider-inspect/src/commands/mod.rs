@@ -5,6 +5,8 @@ use anyhow::Result;
 use crate::context::Context;
 
 mod bio;
+mod broken;
+mod export_cmd;
 mod propositions;
 mod show;
 mod stats;
@@ -22,6 +24,8 @@ pub enum Command {
     WhyDead,
     Propositions,
     Trace,
+    Broken,
+    Export,
 }
 
 impl Command {
@@ -41,6 +45,8 @@ impl Command {
             "why-dead" => Command::WhyDead,
             "propositions" | "props" => Command::Propositions,
             "trace" => Command::Trace,
+            "broken" => Command::Broken,
+            "export" => Command::Export,
             _ => return None,
         };
         Some((cmd, parts[1..].to_vec()))
@@ -60,6 +66,8 @@ impl Command {
             Command::WhyDead => why_dead::run(ctx, args),
             Command::Propositions => propositions::run(ctx, args),
             Command::Trace => trace::run(ctx, args),
+            Command::Broken => broken::run(ctx),
+            Command::Export => export_cmd::run(ctx, args),
         }
     }
 }
@@ -75,14 +83,16 @@ fn print_help() {
     println!(
         "\n\
 Available commands:\n\
-  help, ?          — Show this help\n\
-  quit, q          — Exit the REPL\n\
-  stats            — Show database overview\n\
-  show <id>        — Show full node detail\n\
-  bio              — Vitality leaderboard\n\
-  why-dead <id>    — Explain why a node has a low bio score\n\
-  props <doc_id>   — List propositions for a document\n\
-  trace <doc_id>   — Replay ingestion trace\n\
+  help, ?                — Show this help\n\
+  quit, q                — Exit the REPL\n\
+  stats                  — Show database overview\n\
+  show <id>              — Show full node detail\n\
+  bio                    — Vitality leaderboard\n\
+  why-dead <id>          — Explain why a node has a low bio score\n\
+  props <doc_id>         — List propositions for a document\n\
+  trace <doc_id>         — Replay ingestion trace\n\
+  broken                 — Run integrity check\n\
+  export trace <id> <f>  — Export trace as JSON\n\
 "
     );
 }
