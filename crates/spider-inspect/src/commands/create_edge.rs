@@ -15,8 +15,11 @@ pub fn run(ctx: &mut Context, args: &[&str]) -> Result<Status> {
     }
 
     let src_id: u32 = args[0].parse().map_err(|_| anyhow!("invalid source node ID: '{}'", args[0]))?;
-    let edge_type = args[1];
-    let dst_id: u32 = args[2].parse().map_err(|_| anyhow!("invalid target node ID: '{}'", args[2]))?;
+    let dst_id: u32 = args.last().unwrap().parse()
+        .map_err(|_| anyhow!("invalid target node ID: '{}'", args.last().unwrap()))?;
+    // Edge type is everything between src and dst (rejoin for spaces).
+    let edge_type = args[1..args.len() - 1].join(" ");
+    let edge_type = strip_quotes(&edge_type);
 
     let db = &mut ctx.db;
 
@@ -34,4 +37,14 @@ pub fn run(ctx: &mut Context, args: &[&str]) -> Result<Status> {
 
     output::print_ok(&format!("Created edge #{} ({} → {} [{}])", edge_id.get(), src_id, dst_id, edge_type));
     Ok(Status::Continue)
+}
+
+/// Strip leading/trailing double quotes if present.
+fn strip_quotes(s: &str) -> &str {
+    let s = s.trim();
+    if s.starts_with('"') && s.ends_with('"') && s.len() >= 2 {
+        &s[1..s.len() - 1]
+    } else {
+        s
+    }
 }

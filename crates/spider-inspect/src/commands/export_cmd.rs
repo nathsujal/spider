@@ -52,7 +52,9 @@ pub fn run(ctx: &mut Context, args: &[&str]) -> Result<Status> {
     }
 
     let id: u32 = args[0].parse().map_err(|_| anyhow!("invalid node ID: '{}'", args[0]))?;
-    let file_path = Path::new(args[1]);
+    // File path may contain spaces — rejoin remaining args and strip quotes.
+    let raw_path = args[1..].join(" ");
+    let file_path = Path::new(strip_quotes(&raw_path));
     let node_id = NodeId::new(id)?;
 
     let node = ctx.db.nodes.get(id - 1).map_err(|_| anyhow!("node #{} not found", id))?;
@@ -135,4 +137,14 @@ pub fn run(ctx: &mut Context, args: &[&str]) -> Result<Status> {
 
     output::print_ok(&format!("Exported {} propositions to {}", prop_count, file_path.display()));
     Ok(Status::Continue)
+}
+
+/// Strip leading/trailing double quotes if present.
+fn strip_quotes(s: &str) -> &str {
+    let s = s.trim();
+    if s.starts_with('"') && s.ends_with('"') && s.len() >= 2 {
+        &s[1..s.len() - 1]
+    } else {
+        s
+    }
 }

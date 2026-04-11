@@ -36,17 +36,46 @@ pub fn run(ctx: &mut Context, args: &[&str]) -> Result<Status> {
 
     db.nodes.append(&[node])?;
 
-    // Set optional properties.
-    for arg in &args[1..] {
-        if let Some(eq_pos) = arg.find('=') {
-            let key = &arg[..eq_pos];
-            let value = &arg[eq_pos + 1..];
-            output::set_string_prop(db, node_id, key, value)?;
-        } else {
-            output::print_error(&format!("ignoring invalid arg (expected key=value): '{}'", arg));
-        }
+    // Parse key=value pairs from remaining args, handling quoted values.
+    let props = parse_props(&args[1..])?;
+    for (key, value) in props {
+        output::set_string_prop(db, node_id, &key, &value)?;
     }
 
     output::print_ok(&format!("Created node #{} with label [{}]", node_id, label));
     Ok(Status::Continue)
+}
+
+/// Parse key=value pairs from whitespace-split args.
+/// Handles quoted values: `title="My Doc"` → `("title", "My Doc")`.
+fn parse_props(args: &[&str]) -> Result<Vec<(String, String)>> {
+    let mut result = Vec::new();
+    let mut i = 0;
+    while i < args.len() {
+        let arg = args[i];
+        if let Some(eq_pos) = arg.find('=') {
+            let key = arg[..eq_pos].to_string();
+            let rest = &arg[eq_pos + 1..];
+
+            if let Some(unquoted) = rest.strip_prefix('"') {
+                // Quoted value — collect tokens until closing quote.
+                let mut value = unquoted.to_string();
+                while !value.ends_with('"') && i + 1 < args.len() {
+                    i += 1;
+                    value.push(' ');
+                    value.push_str(args[i]);
+                }
+                // Strip trailing ".
+                if value.ends_with('"') {
+                    value.pop();
+                }
+                result.push((key, value));
+            } else {
+                // Unquoted value (no spaces).
+                result.push((key, rest.to_string()));
+            }
+        }
+        i += 1;
+    }
+    Ok(result)
 }
