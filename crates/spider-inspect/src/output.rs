@@ -86,3 +86,83 @@ pub fn format_timestamp(unix_secs: u32) -> String {
     let day_of_year = days % 365;
     format!("{year}-DOY{day_of_year:03} {hours:02}:{mins:02}:{secs:02}")
 }
+
+/// Sets a string property on a node. Shared helper for write commands.
+pub fn set_string_prop(
+    spider: &mut spider_core::db::lifecycle::Spider,
+    node_id: u32,
+    key: &str,
+    value: &str,
+) -> anyhow::Result<()> {
+    use spider_core::schema::property::{PropKeyId, PropertyBlock, PropertyRecord};
+
+    let key_token = spider.prop_key_tokens.get_or_create(key)
+        .map_err(|e| anyhow::anyhow!("failed to register property key '{}': {}", key, e))?;
+    let key_id = PropKeyId::new(key_token.get())
+        .map_err(|_| anyhow::anyhow!("property key token ID out of range"))?;
+
+    let prop_id = spider.metadata.next_prop_id;
+    spider.metadata.next_prop_id += 1;
+
+    let node_idx = node_id - 1;
+    let mut node = spider.nodes.get(node_idx)?;
+    if node.is_deleted() {
+        return Err(anyhow::anyhow!("node #{} is deleted", node_id));
+    }
+
+    let block = if value.len() <= PropertyBlock::MAX_SHORT_STRING {
+        PropertyBlock::from_short_string(key_id, value)
+            .map_err(|e| anyhow::anyhow!("property value too long: {}", e))?
+    } else {
+        use spider_core::schema::dynamic::DynamicStringRecord;
+        let data = value.as_bytes();
+        let total_len: u32 = data.len().try_into()
+            .map_err(|_| anyhow::anyhow!("property value too long"))?;
+        let block_count = data.len().div_ceil(DynamicStringRecord::DATA_SIZE);
+        let base_id = spider.metadata.next_string_id;
+        spider.metadata.next_string_id += block_count as u32;
+
+        let mut next_block: u32 = 0;
+        let mut head_string_id: u32 = 0;
+
+        for chunk_idx in (0..block_count).rev() {
+            let offset = chunk_idx * DynamicStringRecord::DATA_SIZE;
+            let end = (offset + DynamicStringRecord::DATA_SIZE).min(data.len());
+            let chunk = &data[offset..end];
+            let this_block_id = base_id + chunk_idx as u32;
+
+            let record = if chunk_idx == 0 {
+                DynamicStringRecord::new_start(chunk, total_len, next_block)
+                    .map_err(|e| anyhow::anyhow!("dynamic string error: {}", e))?
+            } else {
+                DynamicStringRecord::new_continuation(chunk, next_block)
+            };
+
+            spider.strings.append(&[record])?;
+            if chunk_idx == 0 {
+                head_string_id = this_block_id;
+            }
+            next_block = this_block_id;
+        }
+
+        PropertyBlock::from_dyn_string_ptr(key_id, head_string_id)
+    };
+
+    let mut prop_record = PropertyRecord::new();
+    prop_record.blocks[0] = block;
+    prop_record.prev_prop_id = 0;
+    prop_record.next_prop_id = node.first_prop_id;
+
+    if node.first_prop_id != 0 {
+        let old_head_idx = node.first_prop_id - 1;
+        let mut old_head = spider.properties.get(old_head_idx)?;
+        old_head.prev_prop_id = prop_id;
+        spider.properties.set(old_head_idx, &old_head)?;
+    }
+
+    node.first_prop_id = prop_id;
+    spider.nodes.set(node_idx, &node)?;
+    spider.properties.append(&[prop_record])?;
+
+    Ok(())
+}
