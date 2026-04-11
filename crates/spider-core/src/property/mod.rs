@@ -1,4 +1,4 @@
-//! Property operations — typed get/set/delete/list for node and edge properties.
+//! Property operations — typed get/list for node properties.
 //!
 //! Provides a high-level API over the raw [`PropertyBlock`](crate::schema::property::PropertyBlock)
 //! storage layer. Resolves [`PropertyValue`] from disk including dereferencing
@@ -7,16 +7,12 @@
 //! ## API
 //!
 //! - [`get()`] — read a single property by key, returns typed [`PropertyValue`]
-//! - [`set()`] — write a property (inserts or overwrites by key)
-//! - [`delete()`] — remove a property by key
-//! - [`list_all()`] — enumerate all properties on a node or edge
 //! - [`get_string()`], [`get_int()`], [`get_float()`], [`get_bool()`] — typed convenience getters
+//! - [`list_all()`] — enumerate all properties on a node
 
 use crate::db::lifecycle::Spider;
 use crate::db::nodes::NodeId;
 use crate::error::{DbError, SpiderResult};
-use crate::schema::edge::Edge;
-use crate::schema::node::Node;
 use crate::schema::property::{PropertyBlock, PropertyRecord, PropertyType};
 use crate::schema::token::TokenId;
 use crate::store::record::Record;
@@ -30,44 +26,31 @@ use crate::store::record::Record;
 /// typed decoders for those are future work.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PropertyValue {
-    /// Boolean value.
     Bool(bool),
-    /// Signed byte (`i8`).
     Byte(i8),
-    /// Signed short (`i16`).
     Short(i16),
-    /// Signed integer (51-bit, fits in `i64`).
     Int(i64),
-    /// Signed long (`i64`, stored across 2 blocks).
-    Long(i64),
-    /// 32-bit float.
+    Long(i64),       // stored across 2 blocks, raw for now
     Float(f32),
-    /// 64-bit float (stored across 2 blocks).
-    Double(f64),
-    /// Unicode character.
+    Double(f64),     // stored across 2 blocks, raw for now
     Char(char),
-    /// Inline short string (≤6 UTF-8 bytes).
-    ShortString(String),
-    /// Long string — dereferenced from `strings.db` chain.
-    String(String),
-    /// Raw block bits for types without a typed decoder yet.
-    /// Contains `(PropertyType, u64)` — the type discriminant and raw value.
-    Raw(PropertyType, u64),
+    ShortString(String),    // ≤6 bytes inline
+    String(String),         // dereferenced from strings.db chain
+    Raw(PropertyType, u64), // fallback for unimplemented types
 }
 
 impl std::fmt::Display for PropertyValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Bool(v) => write!(f, "{}", v),
-            Self::Byte(v) => write!(f, "{}", v),
-            Self::Short(v) => write!(f, "{}", v),
-            Self::Int(v) => write!(f, "{}", v),
-            Self::Long(v) => write!(f, "{}", v),
-            Self::Float(v) => write!(f, "{}", v),
-            Self::Double(v) => write!(f, "{}", v),
-            Self::Char(v) => write!(f, "{}", v),
-            Self::ShortString(v) | Self::String(v) => write!(f, "{}", v),
-            Self::Raw(ty, bits) => write!(f, "{:?}:0x{:x}", ty, bits),
+            Self::Bool(v) => write!(f, "{v}"),
+            Self::Byte(v) => write!(f, "{v}"),
+            Self::Short(v) => write!(f, "{v}"),
+            Self::Int(v) | Self::Long(v) => write!(f, "{v}"),
+            Self::Float(v) => write!(f, "{v}"),
+            Self::Double(v) => write!(f, "{v}"),
+            Self::Char(v) => write!(f, "{v}"),
+            Self::ShortString(v) | Self::String(v) => write!(f, "{v}"),
+            Self::Raw(ty, bits) => write!(f, "{ty:?}:0x{bits:x}"),
         }
     }
 }
@@ -89,38 +72,22 @@ fn decode_block(
     match block.value_type() {
         PropertyType::Empty => Err(DbError::NotFound),
         PropertyType::Bool => Ok(PropertyValue::Bool(block.as_bool().unwrap())),
-        PropertyType::Byte => {
-            let bits = block.value_bits() as i8;
-            Ok(PropertyValue::Byte(bits))
-        }
-        PropertyType::Short => {
-            let bits = block.value_bits() as i16;
-            Ok(PropertyValue::Short(bits))
-        }
+        PropertyType::Byte => Ok(PropertyValue::Byte(block.value_bits() as i8)),
+        PropertyType::Short => Ok(PropertyValue::Short(block.value_bits() as i16)),
         PropertyType::Int => Ok(PropertyValue::Int(block.as_int().unwrap())),
-        PropertyType::Long => {
-            // Not yet supported — would need to read next block.
-            Ok(PropertyValue::Raw(PropertyType::Long, block.value_bits()))
-        }
         PropertyType::Float => Ok(PropertyValue::Float(block.as_float().unwrap())),
-        PropertyType::Double => {
-            // Not yet supported — would need to read next block.
-            Ok(PropertyValue::Raw(PropertyType::Double, block.value_bits()))
-        }
         PropertyType::Char => {
-            let bits = block.value_bits() as u32;
-            let ch = char::from_u32(bits).unwrap_or('\0');
+            let ch = char::from_u32(block.value_bits() as u32).unwrap_or('\0');
             Ok(PropertyValue::Char(ch))
         }
         PropertyType::ShortString => {
             Ok(PropertyValue::ShortString(block.as_short_string().unwrap()))
         }
         PropertyType::String => {
-            // Dereference dynamic string chain.
             let ptr = block.dyn_string_ptr().unwrap();
-            let s = read_dynamic_string(spider, ptr)?;
-            Ok(PropertyValue::String(s))
+            Ok(PropertyValue::String(read_dynamic_string(spider, ptr)?))
         }
+        // Multi-block and unimplemented types → raw
         other => Ok(PropertyValue::Raw(other, block.value_bits())),
     }
 }
@@ -130,12 +97,11 @@ fn read_dynamic_string(spider: &mut Spider, start_id: u32) -> SpiderResult<Strin
     let mut result = Vec::new();
     let mut cursor = start_id;
     let mut steps = 0;
-    let max_steps = 10_000;
 
     while cursor != 0 {
         steps += 1;
-        if steps > max_steps {
-            return Err(DbError::TraversalDepthExceeded { limit: max_steps });
+        if steps > 10_000 {
+            return Err(DbError::TraversalDepthExceeded { limit: 10_000 });
         }
 
         let record = spider.strings.get(cursor - 1)?;
@@ -144,49 +110,35 @@ fn read_dynamic_string(spider: &mut Spider, start_id: u32) -> SpiderResult<Strin
         }
 
         if record.is_start() {
-            let total_len = record.get_length() as usize;
-            result.extend_from_slice(record.get_data(total_len));
+            result.extend_from_slice(record.get_data(record.get_length() as usize));
         } else {
-            // For continuation blocks, we don't know exact length but
-            // the data field contains valid bytes up to DATA_SIZE.
-            // In practice the chain is written contiguously so we just
-            // grab whatever is in the data field.
             result.extend_from_slice(&record.data);
         }
 
         cursor = record.next_block;
     }
 
-    String::from_utf8(result).map_err(|_| {
-        DbError::NotFound // No better variant — string corruption = data not found
-    })
+    String::from_utf8(result).map_err(|_| DbError::NotFound)
 }
 
-// --- Key resolution ---
+// --- Shared property chain walker ---
 
-/// Resolves a property key name to its token ID.
-fn resolve_key(spider: &mut Spider, key: &str) -> SpiderResult<Option<TokenId>> {
-    Ok(spider.prop_key_tokens.get_id(key))
-}
-
-// --- Node property chain walker ---
-
-/// Finds the property block matching the given key on a node.
+/// Yields `(property_record, block_index)` for every non-empty block in the chain.
 ///
-/// Returns `(prop_record, block_index)` for the matching block, or `None`.
-fn find_property_block_on_node(
+/// Returns records by value (they are `Copy`), so the caller can decode
+/// without holding a borrow on `spider`.
+fn walk_property_blocks(
     spider: &mut Spider,
-    node: &Node,
-    key_id: TokenId,
-) -> SpiderResult<Option<(PropertyRecord, usize)>> {
-    let mut cursor = node.first_prop_id;
+    first_prop_id: u32,
+) -> SpiderResult<Vec<(PropertyRecord, usize)>> {
+    let mut results = Vec::new();
+    let mut cursor = first_prop_id;
     let mut steps = 0;
-    let max_steps = 10_000;
 
     while cursor != 0 {
         steps += 1;
-        if steps > max_steps {
-            return Err(DbError::TraversalDepthExceeded { limit: max_steps });
+        if steps > 10_000 {
+            return Err(DbError::TraversalDepthExceeded { limit: 10_000 });
         }
 
         let prop = spider.properties.get(cursor - 1)?;
@@ -195,55 +147,15 @@ fn find_property_block_on_node(
         }
 
         for (i, block) in prop.blocks.iter().enumerate() {
-            if block.is_empty() {
-                continue;
-            }
-            if block.key_id().is_some_and(|k| k.get() == key_id.get()) {
-                return Ok(Some((prop, i)));
+            if !block.is_empty() {
+                results.push((prop, i));
             }
         }
 
         cursor = prop.next_prop_id;
     }
 
-    Ok(None)
-}
-
-/// Finds the property block matching the given key on an edge.
-#[allow(dead_code)]
-fn find_property_block_on_edge(
-    spider: &mut Spider,
-    edge: &Edge,
-    key_id: TokenId,
-) -> SpiderResult<Option<(PropertyRecord, usize)>> {
-    let mut cursor = edge.first_prop_id;
-    let mut steps = 0;
-    let max_steps = 10_000;
-
-    while cursor != 0 {
-        steps += 1;
-        if steps > max_steps {
-            return Err(DbError::TraversalDepthExceeded { limit: max_steps });
-        }
-
-        let prop = spider.properties.get(cursor - 1)?;
-        if prop.is_deleted() {
-            break;
-        }
-
-        for (i, block) in prop.blocks.iter().enumerate() {
-            if block.is_empty() {
-                continue;
-            }
-            if block.key_id().is_some_and(|k| k.get() == key_id.get()) {
-                return Ok(Some((prop, i)));
-            }
-        }
-
-        cursor = prop.next_prop_id;
-    }
-
-    Ok(None)
+    Ok(results)
 }
 
 // --- A single property entry (key + value) ---
@@ -257,7 +169,7 @@ pub struct PropertyEntry {
     pub value: PropertyValue,
 }
 
-// --- Public API: Node properties ---
+// --- Public API ---
 
 /// Reads a single property from a node by key name.
 ///
@@ -266,10 +178,9 @@ pub struct PropertyEntry {
 ///
 /// # Errors
 /// - [`DbError::NodeNotFound`] — if the node doesn't exist or is deleted
-/// - [`DbError::PropertyNotFound`] — if the key doesn't exist on this node
 /// - [`DbError::TraversalDepthExceeded`] — if property chain is corrupt
 pub fn get(spider: &mut Spider, node_id: NodeId, key: &str) -> SpiderResult<Option<PropertyValue>> {
-    let key_tid = match resolve_key(spider, key)? {
+    let key_tid = match spider.prop_key_tokens.get_id(key) {
         Some(tid) => tid,
         None => return Ok(None),
     };
@@ -283,13 +194,15 @@ pub fn get(spider: &mut Spider, node_id: NodeId, key: &str) -> SpiderResult<Opti
         return Ok(None);
     }
 
-    match find_property_block_on_node(spider, &node, key_tid)? {
-        Some((prop, idx)) => {
-            let value = decode_block(spider, &prop.blocks[idx])?;
-            Ok(Some(value))
+    let blocks = walk_property_blocks(spider, node.first_prop_id)?;
+    for (prop, idx) in blocks {
+        let block = &prop.blocks[idx];
+        if block.key_id().is_some_and(|k| k.get() == key_tid.get()) {
+            return Ok(Some(decode_block(spider, block)?));
         }
-        None => Ok(None),
     }
+
+    Ok(None)
 }
 
 /// Reads a property and returns it as a string.
@@ -297,10 +210,7 @@ pub fn get(spider: &mut Spider, node_id: NodeId, key: &str) -> SpiderResult<Opti
 /// Converts numeric/bool types to their string representation.
 /// Returns `None` if the property doesn't exist.
 pub fn get_string(spider: &mut Spider, node_id: NodeId, key: &str) -> SpiderResult<Option<String>> {
-    match get(spider, node_id, key)? {
-        Some(v) => Ok(Some(v.to_string())),
-        None => Ok(None),
-    }
+    get(spider, node_id, key).map(|v| v.map(|v| v.to_string()))
 }
 
 /// Reads a property and returns it as an `i64`.
@@ -350,41 +260,16 @@ pub fn list_all(spider: &mut Spider, node_id: NodeId) -> SpiderResult<Vec<Proper
         return Err(DbError::NodeNotFound(node_id.get()));
     }
 
-    walk_property_chain(spider, node.first_prop_id)
-}
-
-// --- Property chain walker (shared) ---
-
-fn walk_property_chain(
-    spider: &mut Spider,
-    first_prop_id: u32,
-) -> SpiderResult<Vec<PropertyEntry>> {
-    let mut results = Vec::new();
-    let mut cursor = first_prop_id;
-    let mut steps = 0;
-    let max_steps = 10_000;
-
-    while cursor != 0 {
-        steps += 1;
-        if steps > max_steps {
-            return Err(DbError::TraversalDepthExceeded { limit: max_steps });
-        }
-
-        let prop = spider.properties.get(cursor - 1)?;
-        if prop.is_deleted() {
-            break;
-        }
-
-        for block in &prop.blocks {
-            if block.is_empty() {
-                continue;
-            }
+    let blocks = walk_property_blocks(spider, node.first_prop_id)?;
+    blocks
+        .into_iter()
+        .map(|(prop, idx)| {
+            let block = &prop.blocks[idx];
             let key_id = match block.key_id() {
                 Some(k) => k,
-                None => continue,
+                None => return Err(DbError::NotFound),
             };
 
-            // Resolve key name from token store.
             let key_name = spider
                 .prop_key_tokens
                 .get_name(TokenId::new(key_id.get()).unwrap())
@@ -392,13 +277,9 @@ fn walk_property_chain(
                 .unwrap_or_else(|| format!("<key:{}>", key_id.get()));
 
             let value = decode_block(spider, block)?;
-            results.push(PropertyEntry { key: key_name, value });
-        }
-
-        cursor = prop.next_prop_id;
-    }
-
-    Ok(results)
+            Ok(PropertyEntry { key: key_name, value })
+        })
+        .collect()
 }
 
 // --- Tests ---
@@ -412,8 +293,7 @@ mod tests {
 
     fn setup() -> (TempDir, Spider) {
         let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("test_property_db");
-        let db = Spider::open(&db_path).unwrap();
+        let db = Spider::open(&dir.path().join("test_prop_db")).unwrap();
         (dir, db)
     }
 
@@ -422,191 +302,121 @@ mod tests {
     #[test]
     fn get_returns_string_property() {
         let (_dir, mut db) = setup();
-
-        let req = IngestRequest {
+        let result = index(&mut db, &IngestRequest {
             title: "My Document",
-            propositions: vec![
-                Proposition {
-                    text: "Hello",
-                    entities: vec![
-                        Entity { name: "X", entity_type: "T" },
-                    ],
-                },
-            ],
-        };
-        let result = index(&mut db, &req).unwrap();
+            propositions: vec![Proposition {
+                text: "Hello",
+                entities: vec![Entity { name: "X", entity_type: "T" }],
+            }],
+        }).unwrap();
 
         let value = get(&mut db, result.document_id, "title").unwrap();
-        // "My Document" = 11 bytes > 6, so stored as dynamic String.
         assert_eq!(value, Some(PropertyValue::String("My Document".to_string())));
     }
 
     #[test]
     fn get_returns_none_for_missing_key() {
         let (_dir, mut db) = setup();
+        let result = index(&mut db, &IngestRequest {
+            title: "Test", propositions: vec![],
+        }).unwrap();
 
-        let req = IngestRequest {
-            title: "Test",
-            propositions: vec![],
-        };
-        let result = index(&mut db, &req).unwrap();
-
-        let value = get(&mut db, result.document_id, "nonexistent").unwrap();
-        assert!(value.is_none());
+        assert!(get(&mut db, result.document_id, "nonexistent").unwrap().is_none());
     }
 
     #[test]
     fn get_returns_dynamic_string() {
         let (_dir, mut db) = setup();
-
         let long_text = "This is a very long proposition text that exceeds six bytes";
-        let req = IngestRequest {
+        index(&mut db, &IngestRequest {
             title: "Test",
-            propositions: vec![
-                Proposition {
-                    text: long_text,
-                    entities: vec![],
-                },
-            ],
-        };
-        let result = index(&mut db, &req).unwrap();
+            propositions: vec![Proposition { text: long_text, entities: vec![] }],
+        }).unwrap();
 
         let prop_id = crate::db::find::find_by_label(&mut db, "PROPOSITION").unwrap()[0];
         let value = get(&mut db, prop_id, "text").unwrap();
 
-        match &value {
+        match value {
             Some(PropertyValue::String(s)) => assert_eq!(s, long_text),
-            _ => panic!("expected PropertyValue::String, got {:?}", value),
+            other => panic!("expected String, got {other:?}"),
         }
     }
 
     #[test]
     fn get_returns_int_property() {
         let (_dir, mut db) = setup();
-
-        let req = IngestRequest {
+        index(&mut db, &IngestRequest {
             title: "Test",
-            propositions: vec![
-                Proposition {
-                    text: "Hello",
-                    entities: vec![],
-                },
-            ],
-        };
-        let result = index(&mut db, &req).unwrap();
+            propositions: vec![Proposition { text: "Hello", entities: vec![] }],
+        }).unwrap();
 
         let prop_id = crate::db::find::find_by_label(&mut db, "PROPOSITION").unwrap()[0];
-        let value = get(&mut db, prop_id, "chunk_index").unwrap();
-        assert_eq!(value, Some(PropertyValue::Int(0)));
+        assert_eq!(get(&mut db, prop_id, "chunk_index").unwrap(), Some(PropertyValue::Int(0)));
     }
 
     // --- typed getters ---
 
     #[test]
-    fn get_string_returns_string_value() {
+    fn get_string_returns_value() {
         let (_dir, mut db) = setup();
+        let result = index(&mut db, &IngestRequest {
+            title: "My Doc", propositions: vec![],
+        }).unwrap();
 
-        let req = IngestRequest {
-            title: "My Doc",
-            propositions: vec![],
-        };
-        let result = index(&mut db, &req).unwrap();
-
-        let s = get_string(&mut db, result.document_id, "title").unwrap();
-        assert_eq!(s, Some("My Doc".to_string()));
+        assert_eq!(get_string(&mut db, result.document_id, "title").unwrap(), Some("My Doc".to_string()));
     }
 
     #[test]
-    fn get_int_returns_int_value() {
+    fn get_int_returns_value() {
         let (_dir, mut db) = setup();
-
-        let req = IngestRequest {
+        index(&mut db, &IngestRequest {
             title: "Test",
-            propositions: vec![
-                Proposition {
-                    text: "Hello",
-                    entities: vec![],
-                },
-            ],
-        };
-        let result = index(&mut db, &req).unwrap();
+            propositions: vec![Proposition { text: "Hello", entities: vec![] }],
+        }).unwrap();
 
         let prop_id = crate::db::find::find_by_label(&mut db, "PROPOSITION").unwrap()[0];
-        let v = get_int(&mut db, prop_id, "chunk_index").unwrap();
-        assert_eq!(v, Some(0));
+        assert_eq!(get_int(&mut db, prop_id, "chunk_index").unwrap(), Some(0));
     }
 
     #[test]
     fn get_int_returns_none_for_string() {
         let (_dir, mut db) = setup();
+        let result = index(&mut db, &IngestRequest {
+            title: "Test", propositions: vec![],
+        }).unwrap();
 
-        let req = IngestRequest {
-            title: "Test",
-            propositions: vec![],
-        };
-        let result = index(&mut db, &req).unwrap();
-
-        let v = get_int(&mut db, result.document_id, "title").unwrap();
-        assert!(v.is_none());
+        assert!(get_int(&mut db, result.document_id, "title").unwrap().is_none());
     }
 
     // --- list_all ---
 
     #[test]
-    fn list_all_returns_all_properties() {
+    fn list_all_document_properties() {
         let (_dir, mut db) = setup();
-
-        let req = IngestRequest {
+        let result = index(&mut db, &IngestRequest {
             title: "Test Doc",
-            propositions: vec![
-                Proposition {
-                    text: "Hi",
-                    entities: vec![
-                        Entity { name: "A", entity_type: "T" },
-                    ],
-                },
-            ],
-        };
-        let result = index(&mut db, &req).unwrap();
+            propositions: vec![Proposition {
+                text: "Hi",
+                entities: vec![Entity { name: "A", entity_type: "T" }],
+            }],
+        }).unwrap();
 
         let props = list_all(&mut db, result.document_id).unwrap();
-        // Document has: title
-        assert!(props.iter().any(|p| p.key == "title"));
-    }
-
-    #[test]
-    fn list_all_empty_node() {
-        let (_dir, mut db) = setup();
-
-        let req = IngestRequest {
-            title: "Test",
-            propositions: vec![],
-        };
-        let result = index(&mut db, &req).unwrap();
-
-        let props = list_all(&mut db, result.document_id).unwrap();
-        assert_eq!(props.len(), 1); // title
+        assert_eq!(props.len(), 1);
+        assert_eq!(props[0].key, "title");
     }
 
     #[test]
     fn list_all_proposition_properties() {
         let (_dir, mut db) = setup();
-
-        let req = IngestRequest {
+        index(&mut db, &IngestRequest {
             title: "Test",
-            propositions: vec![
-                Proposition {
-                    text: "Hello world",
-                    entities: vec![],
-                },
-            ],
-        };
-        index(&mut db, &req).unwrap();
+            propositions: vec![Proposition { text: "Hello world", entities: vec![] }],
+        }).unwrap();
 
         let prop_id = crate::db::find::find_by_label(&mut db, "PROPOSITION").unwrap()[0];
         let props = list_all(&mut db, prop_id).unwrap();
 
-        // Should have: text, chunk_index
         assert_eq!(props.len(), 2);
         assert!(props.iter().any(|p| p.key == "text"));
         assert!(props.iter().any(|p| p.key == "chunk_index"));
@@ -615,19 +425,13 @@ mod tests {
     #[test]
     fn list_all_entity_properties() {
         let (_dir, mut db) = setup();
-
-        let req = IngestRequest {
+        index(&mut db, &IngestRequest {
             title: "Test",
-            propositions: vec![
-                Proposition {
-                    text: "Facts",
-                    entities: vec![
-                        Entity { name: "Mumbai", entity_type: "LOCATION" },
-                    ],
-                },
-            ],
-        };
-        index(&mut db, &req).unwrap();
+            propositions: vec![Proposition {
+                text: "Facts",
+                entities: vec![Entity { name: "Mumbai", entity_type: "LOCATION" }],
+            }],
+        }).unwrap();
 
         let ent_id = crate::db::find::find_by_property(&mut db, "name", "Mumbai").unwrap()[0];
         let props = list_all(&mut db, ent_id).unwrap();
@@ -637,7 +441,7 @@ mod tests {
         assert!(props.iter().any(|p| p.key == "entity_type"));
     }
 
-    // --- PropertyValue Display ---
+    // --- Display ---
 
     #[test]
     fn property_value_display() {
@@ -652,48 +456,37 @@ mod tests {
     #[test]
     fn decode_empty_block_returns_error() {
         let (_dir, mut db) = setup();
-        let empty_block = PropertyBlock::new();
-        let result = decode_block(&mut db, &empty_block);
-        assert!(matches!(result, Err(DbError::NotFound)));
+        assert!(matches!(decode_block(&mut db, &PropertyBlock::new()), Err(DbError::NotFound)));
     }
 
     #[test]
     fn decode_byte_value() {
         let (_dir, mut db) = setup();
-        let key_id = PropKeyId::new(1).unwrap();
-        let block = PropertyBlock::with_value(key_id, PropertyType::Byte, 42);
-        let value = decode_block(&mut db, &block).unwrap();
-        assert_eq!(value, PropertyValue::Byte(42));
+        let block = PropertyBlock::with_value(PropKeyId::new(1).unwrap(), PropertyType::Byte, 42);
+        assert_eq!(decode_block(&mut db, &block).unwrap(), PropertyValue::Byte(42));
     }
 
     #[test]
     fn decode_short_value() {
         let (_dir, mut db) = setup();
-        let key_id = PropKeyId::new(1).unwrap();
-        let block = PropertyBlock::with_value(key_id, PropertyType::Short, 1000);
-        let value = decode_block(&mut db, &block).unwrap();
-        assert_eq!(value, PropertyValue::Short(1000));
+        let block = PropertyBlock::with_value(PropKeyId::new(1).unwrap(), PropertyType::Short, 1000);
+        assert_eq!(decode_block(&mut db, &block).unwrap(), PropertyValue::Short(1000));
     }
 
     #[test]
     fn decode_char_value() {
         let (_dir, mut db) = setup();
-        let key_id = PropKeyId::new(1).unwrap();
-        let block = PropertyBlock::with_value(key_id, PropertyType::Char, 'A' as u64);
-        let value = decode_block(&mut db, &block).unwrap();
-        assert_eq!(value, PropertyValue::Char('A'));
+        let block = PropertyBlock::with_value(PropKeyId::new(1).unwrap(), PropertyType::Char, 'A' as u64);
+        assert_eq!(decode_block(&mut db, &block).unwrap(), PropertyValue::Char('A'));
     }
 
     #[test]
     fn decode_raw_for_unsupported_types() {
         let (_dir, mut db) = setup();
-        let key_id = PropKeyId::new(1).unwrap();
-        // Long type (not yet fully decoded).
-        let block = PropertyBlock::with_value(key_id, PropertyType::Long, 999);
-        let value = decode_block(&mut db, &block).unwrap();
-        match value {
+        let block = PropertyBlock::with_value(PropKeyId::new(1).unwrap(), PropertyType::Long, 999);
+        match decode_block(&mut db, &block).unwrap() {
             PropertyValue::Raw(PropertyType::Long, 999) => {}
-            _ => panic!("expected Raw for Long type"),
+            other => panic!("expected Raw for Long, got {other:?}"),
         }
     }
 }
