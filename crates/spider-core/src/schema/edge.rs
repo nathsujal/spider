@@ -273,6 +273,11 @@ impl Record for Edge {
     }
 
     #[inline]
+    fn from_raw(bytes: &[u8]) -> Self {
+        Edge::from_bytes(bytes.try_into().unwrap())
+    }
+
+    #[inline]
     fn is_deleted(&self) -> bool {
         self.is_deleted()
     }

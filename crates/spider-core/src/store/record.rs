@@ -9,7 +9,7 @@
 
 use std::fmt::Debug;
 use std::fs::{OpenOptions, File};
-use std::io::{Read, Write, Seek as _};
+use std::io::{Write, Seek as _};
 use std::path::Path;
 use crate::error::SpiderResult;
 
@@ -21,17 +21,13 @@ pub(crate) mod private {
 ///
 /// Implemented by all schema types (Node, Edge, Property, Token, Dynamic).
 /// Defines serialization contract and deletion semantics.
-pub trait Record: Copy + Debug + Send + Sync {
+pub trait Record: Copy + Debug + Send + Sync + private::Sealed {
     const SIZE: usize;
-    type Bytes: AsRef<[u8]> + AsMut<[u8]> + Copy + Default;
+    type Bytes: AsRef<[u8]> + AsMut<[u8]> + Copy;
 
-    /// Serializes record to fixed-size byte array.
     fn to_bytes(&self) -> Self::Bytes;
-
-    /// Deserializes record from bytes.
     fn from_bytes(bytes: Self::Bytes) -> Self;
-
-    /// True if this slot represents a deleted/tombstone record.
+    fn from_raw(bytes: &[u8]) -> Self;
     fn is_deleted(&self) -> bool;
 }
 
@@ -57,6 +53,10 @@ impl Record for TestRecord {
             value: u32::from_le_bytes(bytes[4..8].try_into().unwrap()),
         }
     }
+
+    fn from_raw(bytes: &[u8]) -> Self {
+        Self::from_bytes(bytes.try_into().unwrap())
+    }
     
     fn is_deleted(&self) -> bool { self.id == 0 }
 }
@@ -71,6 +71,10 @@ impl Record for TombstoneRecord {
     type Bytes = [u8; 4];
     fn to_bytes(&self) -> [u8; 4] { [0u8; 4] }
     fn from_bytes(_bytes: [u8; 4]) -> Self { TombstoneRecord }
+    fn from_raw(bytes: &[u8]) -> Self {
+        let _ = bytes;
+        TombstoneRecord
+    }
     fn is_deleted(&self) -> bool { true }
 }
 
@@ -131,9 +135,9 @@ impl<T: Record> RecordFile<T> {
         use std::io::{Read, Seek as _}; 
         let offset = i as u64 * T::SIZE as u64;
         self.file.seek(std::io::SeekFrom::Start(offset))?;
-        let mut bytes = T::Bytes::default(); 
-        self.file.read_exact(bytes.as_mut())?;
-        Ok(T::from_bytes(bytes))
+        let mut buf = vec![0u8; T::SIZE]; 
+        self.file.read_exact(&mut buf)?;
+        Ok(T::from_raw(&buf))
     }
     
     /// Overwrites record at index i.

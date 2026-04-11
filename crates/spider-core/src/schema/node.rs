@@ -312,6 +312,11 @@ impl Record for Node {
     }
 
     #[inline]
+    fn from_raw(bytes: &[u8]) -> Self {
+        Node::from_bytes(bytes.try_into().unwrap())
+    }
+
+    #[inline]
     fn is_deleted(&self) -> bool {
         self.is_deleted()
     }

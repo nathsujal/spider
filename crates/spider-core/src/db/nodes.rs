@@ -34,7 +34,7 @@ impl NodeAccess {
     }
 
     /// Retrieves node by ID (1‑based). Returns Err if node not found.
-    pub fn get(&self, id: NodeId) -> SpiderResult<Node> {
+    pub fn get(&mut self, id: NodeId) -> SpiderResult<Node> {
         let id_val = id.get().saturating_sub(1);
         self.file.get(id_val)
     }

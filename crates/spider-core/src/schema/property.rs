@@ -330,7 +330,7 @@ impl PropertyBlock {
     /// Returns [`PropertyError::IntOutOfRange`] if `value` is outside
     /// `[INT_MIN, INT_MAX]` (±2^50).
     pub fn from_int(key_id: PropKeyId, value: i64) -> Result<Self, PropertyError> {
-        if value < Self::INT_MIN || value > Self::INT_MAX {
+        if !(Self::INT_MIN..=Self::INT_MAX).contains(&value) {
             return Err(PropertyError::IntOutOfRange {
                 value,
                 min: Self::INT_MIN,
@@ -515,9 +515,9 @@ impl PropertyRecord {
         let next_prop_id = u32::from_le_bytes(bytes[4..8].try_into().unwrap());
 
         let mut blocks = [PropertyBlock::new(); 4];
-        for i in 0..4 {
+        for (i, block) in blocks.iter_mut().enumerate() {
             let off = 8 + i * 8;
-            blocks[i] = PropertyBlock::from_bytes(bytes[off..off + 8].try_into().unwrap());
+            *block = PropertyBlock::from_bytes(bytes[off..off + 8].try_into().unwrap());
         }
 
         Self { prev_prop_id, next_prop_id, blocks }
@@ -552,6 +552,11 @@ impl Record for PropertyRecord {
     #[inline]
     fn from_bytes(bytes: [u8; PropertyRecord::SIZE]) -> Self {
         PropertyRecord::from_bytes(bytes)
+    }
+
+    #[inline]
+    fn from_raw(bytes: &[u8]) -> Self {
+        PropertyRecord::from_bytes(bytes.try_into().unwrap())
     }
 
     /// `true` if this slot is a tombstone (all blocks empty, no chain links).

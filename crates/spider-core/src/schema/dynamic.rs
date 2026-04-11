@@ -411,6 +411,11 @@ impl Record for DynamicStringRecord {
     }
 
     #[inline]
+    fn from_raw(bytes: &[u8]) -> Self {
+        DynamicStringRecord::from_bytes(bytes.try_into().unwrap())
+    }
+
+    #[inline]
     fn is_deleted(&self) -> bool { !self.is_in_use() }
 }
 
@@ -433,6 +438,11 @@ impl Record for DynamicArrayRecord {
     #[inline]
     fn from_bytes(bytes: [u8; DynamicArrayRecord::SIZE]) -> Self {
         DynamicArrayRecord::from_bytes(bytes)
+    }
+
+    #[inline]
+    fn from_raw(bytes: &[u8]) -> Self {
+        DynamicArrayRecord::from_bytes(bytes.try_into().unwrap())
     }
 
     #[inline]
