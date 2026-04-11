@@ -38,6 +38,22 @@ use crate::schema::dynamic::{DynamicStringRecord, DynamicArrayRecord};
 use crate::schema::token::TokenStore;
 use crate::store::record::RecordFile;
 
+/// Returns the platform-default database directory path.
+///
+/// | Platform | Path |
+/// |---|---|
+/// | Linux   | `~/.local/share/spider/default/` |
+/// | macOS   | `~/Library/Application Support/spider/default/` |
+/// | Windows | `%APPDATA%\spider\default\` |
+///
+/// The directory is **not** created by this function — callers should
+/// use [`Spider::open()`](Spider::open) which creates it automatically.
+pub fn default_db_path() -> PathBuf {
+    let proj = directories::ProjectDirs::from("dev", "spider", "spider")
+        .expect("could not determine home directory");
+    proj.data_dir().join("default")
+}
+
 // Metadata
 
 /// 44-byte metadata header stored in `meta.db`.
@@ -226,34 +242,14 @@ impl Spider {
     /// # Errors
     /// Returns `Err` if any file cannot be opened, created, or read.
     pub fn open(path: &Path) -> SpiderResult<Self> {
-        // Ensure database directory exists.
         fs::create_dir_all(path)?;
 
-        // Metadata
-        let meta_path = path.join(Self::META_FILE);
-        let metadata = if meta_path.exists() {
-            let data = fs::read(&meta_path)?;
-            if data.len() != Metadata::SIZE {
-                return Err(crate::error::DbError::CorruptMetadata {
-                    expected_bytes: Metadata::SIZE,
-                    got_bytes: data.len(),
-                });
-            }
-            Metadata::from_bytes(data.try_into().unwrap())
-        } else {
-            let meta = Metadata::default();
-            fs::write(&meta_path, meta.to_bytes())?;
-            meta
-        };
-
-        // Record files
-        let nodes = Self::open_or_create_record_file(&path.join(Self::NODES_FILE))?;
-        let edges = Self::open_or_create_record_file(&path.join(Self::EDGES_FILE))?;
-        let properties = Self::open_or_create_record_file(&path.join(Self::PROPERTIES_FILE))?;
-        let strings = Self::open_or_create_record_file(&path.join(Self::STRINGS_FILE))?;
-        let arrays = Self::open_or_create_record_file(&path.join(Self::ARRAYS_FILE))?;
-
-        // Token stores
+        let metadata = Self::load_metadata(path)?;
+        let nodes = Self::open_or_create(&path.join(Self::NODES_FILE))?;
+        let edges = Self::open_or_create(&path.join(Self::EDGES_FILE))?;
+        let properties = Self::open_or_create(&path.join(Self::PROPERTIES_FILE))?;
+        let strings = Self::open_or_create(&path.join(Self::STRINGS_FILE))?;
+        let arrays = Self::open_or_create(&path.join(Self::ARRAYS_FILE))?;
         let label_tokens = Self::load_token_store(&path.join(Self::LABELS_TOKEN_FILE))?;
         let edge_type_tokens = Self::load_token_store(&path.join(Self::EDGE_TYPES_TOKEN_FILE))?;
         let prop_key_tokens = Self::load_token_store(&path.join(Self::PROP_KEYS_TOKEN_FILE))?;
@@ -271,6 +267,24 @@ impl Spider {
             prop_key_tokens,
             closed: false,
         })
+    }
+
+    /// Opens or creates a database at the platform-default location.
+    ///
+    /// | Platform | Default Path |
+    /// |---|---|
+    /// | Linux   | `~/.local/share/spider/default/` |
+    /// | macOS   | `~/Library/Application Support/spider/default/` |
+    /// | Windows | `%APPDATA%\spider\default\` |
+    ///
+    /// The directory is created automatically if it doesn't exist.
+    /// This is equivalent to `Spider::open(&default_db_path())`.
+    ///
+    /// # Errors
+    /// Returns `Err` if the default path cannot be resolved or any
+    /// file cannot be opened, created, or read.
+    pub fn open_default() -> SpiderResult<Self> {
+        Self::open(&default_db_path())
     }
 
     /// The database directory path.
@@ -294,31 +308,46 @@ impl Spider {
         }
         self.closed = true;
 
-        // Flush metadata.
-        let meta_path = self.path.join(Self::META_FILE);
-        fs::write(&meta_path, self.metadata.to_bytes())?;
+        fs::write(
+            self.path.join(Self::META_FILE),
+            self.metadata.to_bytes(),
+        )?;
 
-        // Flush token stores.
-        Self::save_token_store(
-            &self.path.join(Self::LABELS_TOKEN_FILE),
-            &self.label_tokens,
-        )?;
-        Self::save_token_store(
-            &self.path.join(Self::EDGE_TYPES_TOKEN_FILE),
-            &self.edge_type_tokens,
-        )?;
-        Self::save_token_store(
-            &self.path.join(Self::PROP_KEYS_TOKEN_FILE),
-            &self.prop_key_tokens,
-        )?;
+        let token_files = [
+            (Self::LABELS_TOKEN_FILE, &self.label_tokens),
+            (Self::EDGE_TYPES_TOKEN_FILE, &self.edge_type_tokens),
+            (Self::PROP_KEYS_TOKEN_FILE, &self.prop_key_tokens),
+        ];
+        for (name, store) in token_files {
+            Self::save_token_store(&self.path.join(name), store)?;
+        }
 
         Ok(())
     }
 
     // Private helpers
 
+    /// Reads or initializes the metadata header.
+    fn load_metadata(path: &Path) -> SpiderResult<Metadata> {
+        let meta_path = path.join(Self::META_FILE);
+        if meta_path.exists() {
+            let data = fs::read(&meta_path)?;
+            if data.len() != Metadata::SIZE {
+                return Err(crate::error::DbError::CorruptMetadata {
+                    expected_bytes: Metadata::SIZE,
+                    got_bytes: data.len(),
+                });
+            }
+            Ok(Metadata::from_bytes(data.try_into().unwrap()))
+        } else {
+            let meta = Metadata::default();
+            fs::write(&meta_path, meta.to_bytes())?;
+            Ok(meta)
+        }
+    }
+
     /// Opens a `RecordFile<T>` — creates if missing, opens if existing.
-    fn open_or_create_record_file<T: crate::store::record::Record>(
+    fn open_or_create<T: crate::store::record::Record>(
         path: &Path,
     ) -> SpiderResult<RecordFile<T>> {
         if path.exists() {
@@ -363,6 +392,25 @@ mod tests {
     use super::*;
 
     #[test]
+    fn default_db_path_contains_spider() {
+        let path = default_db_path();
+        let components: Vec<_> = path.components().collect();
+        // Last component should be "default"
+        assert_eq!(components.last().unwrap().as_os_str(), "default");
+        // Parent should contain "spider" somewhere
+        let parent = path.parent().unwrap();
+        assert!(parent.to_string_lossy().contains("spider"));
+    }
+
+    #[test]
+    fn open_default_creates_database() {
+        let db = Spider::open_default().expect("open_default should succeed");
+        assert!(db.path().ends_with("default"));
+        assert!(db.path().join(Spider::META_FILE).exists());
+        assert!(db.path().join(Spider::NODES_FILE).exists());
+    }
+
+    #[test]
     fn metadata_default_sane() {
         let m = Metadata::default();
         assert_eq!(m.next_node_id, 1);
@@ -378,14 +426,9 @@ mod tests {
     #[test]
     fn metadata_round_trip() {
         let m = Metadata {
-            next_node_id: 42,
-            next_rel_id: 100,
-            next_prop_id: 7,
-            next_string_id: 3,
-            next_array_id: 5,
-            bio_w_sig: 2.5,
-            bio_w_freq: 1.3,
-            bio_gravity: 0.8,
+            next_node_id: 42, next_rel_id: 100, next_prop_id: 7,
+            next_string_id: 3, next_array_id: 5,
+            bio_w_sig: 2.5, bio_w_freq: 1.3, bio_gravity: 0.8,
         };
         let restored = Metadata::from_bytes(m.to_bytes());
         assert_eq!(restored.next_node_id, 42);
@@ -407,10 +450,8 @@ mod tests {
     fn open_creates_fresh_database() {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("test_db");
-
         let db = Spider::open(&db_path).unwrap();
 
-        // Directory and all files should exist.
         assert!(db_path.exists());
         assert!(db_path.join(Spider::META_FILE).exists());
         assert!(db_path.join(Spider::NODES_FILE).exists());
@@ -418,12 +459,7 @@ mod tests {
         assert!(db_path.join(Spider::PROPERTIES_FILE).exists());
         assert!(db_path.join(Spider::STRINGS_FILE).exists());
         assert!(db_path.join(Spider::ARRAYS_FILE).exists());
-
-        // Metadata should be defaults.
         assert_eq!(db.metadata.next_node_id, 1);
-        assert_eq!(db.metadata.bio_w_sig, 1.0);
-
-        // Token stores should be empty.
         assert!(db.label_tokens.is_empty());
         assert!(db.edge_type_tokens.is_empty());
         assert!(db.prop_key_tokens.is_empty());
@@ -433,16 +469,12 @@ mod tests {
     fn close_persists_metadata() {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("test_db");
-
-        // Open, modify metadata, close.
         {
             let mut db = Spider::open(&db_path).unwrap();
             db.metadata.next_node_id = 99;
             db.metadata.bio_w_sig = 3.14;
             db.close().unwrap();
         }
-
-        // Reopen and verify persisted values.
         let db = Spider::open(&db_path).unwrap();
         assert_eq!(db.metadata.next_node_id, 99);
         assert!((db.metadata.bio_w_sig - 3.14).abs() < f64::EPSILON);
@@ -452,8 +484,6 @@ mod tests {
     fn close_persists_token_stores() {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("test_db");
-
-        // Open, add tokens, close.
         {
             let mut db = Spider::open(&db_path).unwrap();
             db.label_tokens.get_or_create("Person").unwrap();
@@ -462,8 +492,6 @@ mod tests {
             db.prop_key_tokens.get_or_create("name").unwrap();
             db.close().unwrap();
         }
-
-        // Reopen and verify tokens survived.
         let db = Spider::open(&db_path).unwrap();
         assert_eq!(db.label_tokens.len(), 2);
         assert!(db.label_tokens.contains("Person"));
@@ -478,16 +506,11 @@ mod tests {
     fn drop_flushes_without_explicit_close() {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("test_db");
-
-        // Open, modify, drop (no explicit close).
         {
             let mut db = Spider::open(&db_path).unwrap();
             db.metadata.next_node_id = 77;
             db.label_tokens.get_or_create("Entity").unwrap();
-            // db dropped here — Drop should flush
         }
-
-        // Reopen and verify data was persisted.
         let db = Spider::open(&db_path).unwrap();
         assert_eq!(db.metadata.next_node_id, 77);
         assert!(db.label_tokens.contains("Entity"));
@@ -497,23 +520,19 @@ mod tests {
     fn double_close_is_safe() {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("test_db");
-
         let mut db = Spider::open(&db_path).unwrap();
         db.close().unwrap();
-        db.close().unwrap(); // should be a no-op
+        db.close().unwrap();
     }
 
     #[test]
     fn reopen_preserves_empty_database() {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("test_db");
-
-        // Open, close, reopen — nothing should change.
         {
             let mut db = Spider::open(&db_path).unwrap();
             db.close().unwrap();
         }
-
         let db = Spider::open(&db_path).unwrap();
         assert_eq!(db.metadata.next_node_id, 1);
         assert!(db.label_tokens.is_empty());
@@ -523,23 +542,15 @@ mod tests {
     fn corrupt_metadata_detected() {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("test_db");
-
-        // Create database.
         {
             let mut db = Spider::open(&db_path).unwrap();
             db.close().unwrap();
         }
-
-        // Corrupt meta.db by writing wrong-size data.
         fs::write(db_path.join(Spider::META_FILE), b"short").unwrap();
-
-        // Reopen should fail with CorruptMetadata.
         let result = Spider::open(&db_path);
-        assert!(result.is_err());
-        let err = result.unwrap_err();
         assert!(
-            matches!(err, crate::error::DbError::CorruptMetadata { .. }),
-            "expected CorruptMetadata, got: {err}"
+            matches!(result, Err(crate::error::DbError::CorruptMetadata { .. })),
+            "expected CorruptMetadata, got: {result:?}",
         );
     }
 
@@ -555,21 +566,12 @@ mod tests {
     fn nodes_append_and_read_back() {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("test_db");
-
-        let node = Node::new(
-            1,
-            &[],
-            1_700_000_000,
-            None,
-        ).unwrap();
-
-        // Write a node, close, reopen, read back.
+        let node = Node::new(1, &[], 1_700_000_000, None).unwrap();
         {
             let mut db = Spider::open(&db_path).unwrap();
             db.nodes.append(&[node]).unwrap();
             db.close().unwrap();
         }
-
         {
             let mut db = Spider::open(&db_path).unwrap();
             let read_back = db.nodes.get(0).unwrap();
