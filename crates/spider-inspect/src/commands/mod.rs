@@ -4,6 +4,7 @@ use anyhow::Result;
 
 use crate::context::Context;
 
+mod bio;
 mod show;
 mod stats;
 
@@ -14,6 +15,7 @@ pub enum Command {
     Quit,
     Stats,
     Show,
+    Bio,
 }
 
 impl Command {
@@ -29,6 +31,7 @@ impl Command {
             "quit" | "exit" | "q" => Command::Quit,
             "stats" => Command::Stats,
             "show" => Command::Show,
+            "bio" => Command::Bio,
             _ => return None,
         };
         Some((cmd, parts[1..].to_vec()))
@@ -44,6 +47,7 @@ impl Command {
             Command::Quit => Ok(Status::Quit),
             Command::Stats => stats::run(ctx),
             Command::Show => show::run(ctx, args),
+            Command::Bio => bio::run(ctx),
         }
     }
 }
@@ -63,6 +67,7 @@ Available commands:\n\
   quit, q       — Exit the REPL\n\
   stats         — Show database overview\n\
   show <id>     — Show full node detail\n\
+  bio           — Vitality leaderboard\n\
 "
     );
 }
