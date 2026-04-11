@@ -10,7 +10,9 @@ use std::path::PathBuf;
 mod commands;
 mod context;
 mod output;
+mod output_globals;
 mod repl;
+mod sink;
 
 /// Spider Inspect — Interactive REPL for debugging Spider databases.
 #[derive(Parser, Debug)]

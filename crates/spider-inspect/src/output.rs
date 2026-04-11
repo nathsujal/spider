@@ -1,23 +1,12 @@
-//! Shared output helpers — tables, colors, value formatting.
+//! Output helpers — std formatting functions shared by REPL and TUI.
 
 use colored::Colorize;
 use comfy_table::{Table, Attribute, Cell, Row};
-use spider_core::bio::tier::BioTier;
-use spider_core::schema::token::{TokenId, TokenStore};
 
-/// Prints an error in red.
-pub fn print_error(msg: &str) {
-    eprintln!("{}", msg.red().bold());
-}
-
-/// Prints a success message in green.
-#[allow(dead_code)]
-pub fn print_ok(msg: &str) {
-    println!("{}", msg.green());
-}
+// --- Formatting helpers (used by both REPL and TUI) ---
 
 /// Builds a styled table with the given headers and rows.
-pub fn table(headers: &[&str], rows: Vec<Vec<String>>) -> Table {
+pub fn make_table(headers: &[&str], rows: Vec<Vec<String>>) -> Table {
     let mut t = Table::new();
     t.load_preset(comfy_table::presets::UTF8_FULL);
     t.apply_modifier(comfy_table::modifiers::UTF8_ROUND_CORNERS);
@@ -36,38 +25,19 @@ pub fn table(headers: &[&str], rows: Vec<Vec<String>>) -> Table {
     t
 }
 
-/// Resolves a label token ID to its name.
-pub fn resolve_label(tokens: &mut TokenStore, id: u8) -> String {
-    TokenId::new(id)
-        .ok()
-        .and_then(|tid| tokens.get_name(tid).map(|s| s.to_string()))
-        .unwrap_or_else(|| format!("<{}>", id))
-}
-
-/// Resolves an edge type token ID to its name.
-#[allow(dead_code)]
-pub fn resolve_edge_type(tokens: &mut TokenStore, id: u8) -> String {
-    TokenId::new(id)
-        .ok()
-        .and_then(|tid| tokens.get_name(tid).map(|s| s.to_string()))
-        .unwrap_or_else(|| format!("<{}>", id))
-}
-
 /// Formats a bio score with tier label, color-coded.
-#[allow(dead_code)]
 pub fn format_bio(score: f64) -> String {
-    let tier = BioTier::from_score(score);
+    let tier = spider_core::bio::tier::BioTier::from_score(score);
     let colored = match tier {
-        BioTier::Hot => format!("{:.2}", score).green().bold().to_string(),
-        BioTier::Warm => format!("{:.2}", score).yellow().to_string(),
-        BioTier::Cold => format!("{:.2}", score).dimmed().to_string(),
-        BioTier::Pruned => format!("{:.2}", score).red().to_string(),
+        spider_core::bio::tier::BioTier::Hot => format!("{:.2}", score).green().bold().to_string(),
+        spider_core::bio::tier::BioTier::Warm => format!("{:.2}", score).yellow().to_string(),
+        spider_core::bio::tier::BioTier::Cold => format!("{:.2}", score).dimmed().to_string(),
+        spider_core::bio::tier::BioTier::Pruned => format!("{:.2}", score).red().to_string(),
     };
     format!("{colored}  [{tier}]")
 }
 
 /// Formats significance as 0.00 with raw /255.
-#[allow(dead_code)]
 pub fn format_significance(sig: u8) -> String {
     format!("{:.2} ({}/255)", sig as f64 / 255.0, sig)
 }
@@ -75,16 +45,31 @@ pub fn format_significance(sig: u8) -> String {
 /// Formats a UNIX timestamp as a human-readable date string.
 #[allow(dead_code)]
 pub fn format_timestamp(unix_secs: u32) -> String {
-    // Simple format without chrono dependency.
     let days = unix_secs / 86400;
     let remaining = unix_secs % 86400;
     let hours = remaining / 3600;
     let mins = (remaining % 3600) / 60;
     let secs = remaining % 60;
-    // Approximate date from days since epoch (good enough for debug tool).
     let year = 1970 + days / 365;
     let day_of_year = days % 365;
     format!("{year}-DOY{day_of_year:03} {hours:02}:{mins:02}:{secs:02}")
+}
+
+/// Resolves a label token ID to its name.
+pub fn resolve_label(tokens: &mut spider_core::schema::token::TokenStore, id: u8) -> String {
+    spider_core::schema::token::TokenId::new(id)
+        .ok()
+        .and_then(|tid| tokens.get_name(tid).map(String::from))
+        .unwrap_or_else(|| format!("<{}>", id))
+}
+
+/// Resolves an edge type token ID to its name.
+#[allow(dead_code)]
+pub fn resolve_edge_type(tokens: &mut spider_core::schema::token::TokenStore, id: u8) -> String {
+    spider_core::schema::token::TokenId::new(id)
+        .ok()
+        .and_then(|tid| tokens.get_name(tid).map(String::from))
+        .unwrap_or_else(|| format!("<{}>", id))
 }
 
 /// Sets a string property on a node. Shared helper for write commands.
@@ -167,38 +152,13 @@ pub fn set_string_prop(
     Ok(())
 }
 
-/// Paginated table printer. Prints rows in pages of PAGE_SIZE, prompts "press enter for more".
-pub fn print_paged_table(headers: &[&str], rows: Vec<Vec<String>>) {
-    const PAGE_SIZE: usize = 20;
+// --- Re-exports for backward compatibility with existing command imports ---
+// These route through the global sink so commands don't need signature changes.
 
-    if rows.is_empty() {
-        println!("(no results)");
-        return;
-    }
-
-    let total = rows.len();
-    let mut shown = 0;
-
-    loop {
-        let end = (shown + PAGE_SIZE).min(total);
-        let page = &rows[shown..end];
-        println!("{}", table(headers, page.to_vec()));
-
-        shown = end;
-        if shown >= total {
-            break;
-        }
-
-        print!("\n  {} rows shown, {}/{} total — press Enter for more: ",
-            PAGE_SIZE, shown, total);
-        use std::io::Write;
-        let _ = std::io::stdout().flush();
-
-        let mut buf = String::new();
-        let _ = std::io::stdin().read_line(&mut buf);
-        if buf.trim().eq_ignore_ascii_case("q") {
-            println!("(cancelled)");
-            break;
-        }
-    }
-}
+pub use crate::output_globals::{
+    print_error, print_line, print_ok, print_paged_table, print_table,
+    set_node_id, set_tree_view,
+};
+// `make_table` is already `pub` above; commands that import `output::table`
+// get the function directly.
+pub use make_table as table;
