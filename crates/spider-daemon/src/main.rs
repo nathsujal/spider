@@ -1,12 +1,7 @@
-mod events;
-mod jobs;
-mod routes;
-mod server;
-mod ws;
-
 use anyhow::Result;
 use clap::Parser;
 use spider_core::db::lifecycle::Spider;
+use spider_daemon::server;
 use std::path::PathBuf;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 

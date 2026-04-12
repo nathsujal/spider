@@ -12,6 +12,10 @@ description = "HTTP/WebSocket daemon for Spider - bio-inspired AI agent memory g
 name = "spider-daemon"
 path = "src/main.rs"
 
+[lib]
+name = "spider_daemon"
+path = "src/lib.rs"
+
 [dependencies]
 spider-core = { workspace = true }
 
@@ -45,3 +49,5 @@ multer = "3.1"
 [dev-dependencies]
 reqwest = { version = "0.12", features = ["json", "multipart", "stream"] }
 tempfile = "3"
+http-body-util = "0.1"
+tower = { version = "0.5", features = ["util"] }
