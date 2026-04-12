@@ -31,6 +31,9 @@ futures = { workspace = true }
 # Error handling
 anyhow = { workspace = true }
 
+# CLI
+clap = { version = "4.5", features = ["derive"] }
+
 # Utils
 directories = "6.0"
 tracing = "0.1"
@@ -38,3 +41,4 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [dev-dependencies]
 reqwest = { version = "0.12", features = ["json"] }
+tempfile = "3"
