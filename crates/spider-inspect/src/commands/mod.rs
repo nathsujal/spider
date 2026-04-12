@@ -1,0 +1,211 @@
+//! Command definitions and dispatch.
+
+use anyhow::Result;
+
+use crate::context::Context;
+use crate::output;
+
+mod bio;
+mod broken;
+mod cmd_set;
+mod cmd_sig;
+mod cmd_touch;
+mod create_edge;
+mod create_node;
+mod delete_edge;
+mod delete_node;
+mod find_cmd;
+mod graph_vis;
+mod export_cmd;
+mod propositions;
+mod prune_preview;
+mod show;
+mod stats;
+mod trace;
+mod top_cmd;
+mod tree;
+mod validate_cmd;
+mod why_dead;
+mod hex_dump;
+mod schema_cmd;
+
+/// Available REPL commands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Command {
+    Help,
+    Quit,
+    Stats,
+    Show,
+    Bio,
+    WhyDead,
+    Propositions,
+    Trace,
+    Broken,
+    Export,
+    CreateNode,
+    CreateEdge,
+    Set,
+    DeleteNode,
+    DeleteEdge,
+    Touch,
+    Sig,
+    Tree,
+    Graph,
+    Find,
+    Top,
+    PrunePreview,
+    Schema,
+    Hex,
+    Validate,
+}
+
+impl Command {
+    /// Parse a command from user input.
+    /// Returns `(Command, args)` where args are space-separated tokens after the command.
+    pub fn parse(input: &str) -> Option<(Self, Vec<&str>)> {
+        let parts: Vec<&str> = input.split_whitespace().collect();
+        if parts.is_empty() {
+            return None;
+        }
+        let cmd = match parts[0].to_lowercase().as_str() {
+            "help" | "?" => Command::Help,
+            "quit" | "exit" | "q" => Command::Quit,
+            "stats" => Command::Stats,
+            "show" => Command::Show,
+            "bio" => Command::Bio,
+            "why-dead" => Command::WhyDead,
+            "propositions" | "props" => Command::Propositions,
+            "trace" => Command::Trace,
+            "broken" => Command::Broken,
+            "export" => Command::Export,
+            "create" => {
+                if parts.len() > 1 {
+                    match parts[1].to_lowercase().as_str() {
+                        "node" => Command::CreateNode,
+                        "edge" => Command::CreateEdge,
+                        _ => return None,
+                    }
+                } else {
+                    return None;
+                }
+            }
+            "set" => Command::Set,
+            "delete" => {
+                if parts.len() > 1 {
+                    match parts[1].to_lowercase().as_str() {
+                        "node" => Command::DeleteNode,
+                        "edge" => Command::DeleteEdge,
+                        _ => return None,
+                    }
+                } else {
+                    return None;
+                }
+            }
+            "touch" => Command::Touch,
+            "sig" => Command::Sig,
+            "tree" => Command::Tree,
+            "graph" => Command::Graph,
+            "find" => Command::Find,
+            "top" => Command::Top,
+            "prune-preview" => Command::PrunePreview,
+            "schema" => Command::Schema,
+            "hex" => Command::Hex,
+            "validate" => Command::Validate,
+            _ => return None,
+        };
+
+        // For two-word commands (create node, delete node, etc.), skip the subcommand.
+        let skip = match cmd {
+            Command::CreateNode | Command::CreateEdge
+            | Command::DeleteNode | Command::DeleteEdge => 2,
+            _ => 1,
+        };
+        Some((cmd, parts[skip..].to_vec()))
+    }
+
+    /// Execute the command with the given arguments.
+    pub fn execute(&self, ctx: &mut Context, args: &[&str]) -> Result<Status> {
+        match self {
+            Command::Help => {
+                print_help();
+                Ok(Status::Continue)
+            }
+            Command::Quit => Ok(Status::Quit),
+            Command::Stats => stats::run(ctx),
+            Command::Show => show::run(ctx, args),
+            Command::Bio => bio::run(ctx),
+            Command::WhyDead => why_dead::run(ctx, args),
+            Command::Propositions => propositions::run(ctx, args),
+            Command::Trace => trace::run(ctx, args),
+            Command::Broken => broken::run(ctx),
+            Command::Export => export_cmd::run(ctx, args),
+            Command::CreateNode => create_node::run(ctx, args),
+            Command::CreateEdge => create_edge::run(ctx, args),
+            Command::Set => cmd_set::run(ctx, args),
+            Command::DeleteNode => delete_node::run(ctx, args),
+            Command::DeleteEdge => delete_edge::run(ctx, args),
+            Command::Touch => cmd_touch::run(ctx, args),
+            Command::Sig => cmd_sig::run(ctx, args),
+            Command::Tree => tree::run(ctx, args),
+            Command::Graph => graph_vis::run(ctx, args),
+            Command::Find => {
+                if args.is_empty() {
+                    output::print_error("usage: find [label|prop|bio] ...");
+                    Ok(Status::Continue)
+                } else {
+                    let sub = args[0];
+                    find_cmd::run(ctx, sub, &args[1..])
+                }
+            }
+            Command::Top => Ok(top_cmd::run(ctx, args)),
+            Command::PrunePreview => Ok(prune_preview::run(ctx)),
+            Command::Schema => Ok(schema_cmd::run(ctx)),
+            Command::Hex => hex_dump::run(ctx, args),
+            Command::Validate => Ok(validate_cmd::run(ctx)),
+        }
+    }
+}
+
+/// Command execution result.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Status {
+    Continue,
+    Quit,
+}
+
+fn print_help() {
+    println!(
+        "\n\
+Available commands:\n\
+  help, ?                — Show this help\n\
+  quit, q                — Exit the REPL\n\
+  stats                  — Show database overview\n\
+  show <id>              — Show full node detail\n\
+  bio                    — Vitality leaderboard\n\
+  why-dead <id>          — Explain why a node has a low bio score\n\
+  props <doc_id>         — List propositions for a document\n\
+  trace <doc_id>         — Replay ingestion trace\n\
+  broken                 — Run integrity check\n\
+  export trace <id> <f>  — Export trace as JSON\n\
+  create node <L> [k=v]  — Create a new node with label and optional properties\n\
+  create edge <s> <T> <d> — Create a directed edge between two nodes\n\
+  set <id> <k> <v>       — Set a string property on a node\n\
+  delete node <id>       — Soft-delete a node (warns about live edges)\n\
+  delete edge <id>       — Soft-delete an edge\n\
+  touch <id>             — Increment access count (affects bio score)\n\
+  sig <id> <0-255>       — Set node significance, prints new bio score\n\
+  tree <doc_id>          — Print tree of document → propositions → entities\n\
+  graph <id> [depth]     — Render neighborhood subgraph (default depth=2)\n\
+  find label <LABEL>     — List all nodes with a given label\n\
+  find prop <k> <v>      — List nodes with matching property\n\
+  find bio <min>         — List nodes with bio score above threshold\n\
+  top [n]                — Show top N nodes by bio score (default 10)\n\
+  prune-preview          — Show nodes that would be pruned (score ≤ 0)\n\
+  schema                 — Print on-disk record layout schemas\n\
+  hex <id>               — Hex dump of a node record with field annotations\n\
+  validate               — Strict integrity check (chains, pointers, tokens)\n\
+\n\
+Note: changes are persisted when you exit the REPL.\n\
+"
+    );
+}

@@ -1,0 +1,35 @@
+[package]
+name = "spider-inspect"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Interactive TUI for debugging Spider databases"
+
+[[bin]]
+name = "spider-inspect"
+path = "src/main.rs"
+
+[dependencies]
+spider-core = { workspace = true }
+
+# CLI
+clap = { workspace = true }
+colored = { workspace = true }
+comfy-table = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+csv = { workspace = true }
+
+# Utils
+atty = { workspace = true }
+anyhow = { workspace = true }
+directories = "6.0"
+
+# TUI
+ratatui = "0.29"
+crossterm = "0.28"

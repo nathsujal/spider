@@ -1,46 +1,38 @@
 # Build artifacts
 target/
-*.rlib
-*.rmeta
+Cargo.lock
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+*.so
+*.dylib
+
+# Spider database files
+*.db
 
 # IDE / Editor
-.idea/
 .vscode/
+.idea/
 *.swp
 *.swo
 *~
 .DS_Store
-.gemini
 
-# Python
-.venv/
-venv/
-__pycache__/
-*.pyc
-*.pyo
-.python-version
-
-# Rust
-Cargo.lock
-*.rs.bk
-
-# Spider data files
-*.db
-data/
-
-# Test files
-tools/
-tests/
+# Testing
 test*.py
-test_data/
-
-# Generated docs
-/doc/
-
-# Local development
 lib/
-.env
-.env.local
 
-# Logs
-*.log
+# Maturin
+*.whl
+
+# Claude
+.claude/
+ClAUDE.md
+
+# Planning
+.planning/
