@@ -11,6 +11,7 @@ mod commands;
 mod context;
 mod output;
 mod output_globals;
+#[cfg(feature = "repl")]
 mod repl;
 mod sink;
 
@@ -29,5 +30,15 @@ struct Args {
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    repl::run(args.db_path)
+
+    #[cfg(feature = "repl")]
+    {
+        return repl::run(args.db_path);
+    }
+
+    #[cfg(not(feature = "repl"))]
+    {
+        eprintln!("REPL feature not enabled. Build with --features repl or --features tui");
+        Ok(())
+    }
 }

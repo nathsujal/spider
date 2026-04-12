@@ -12,13 +12,18 @@ description = "Interactive REPL for debugging Spider databases"
 name = "spider-inspect"
 path = "src/main.rs"
 
+[features]
+default = ["repl"]
+repl = ["dep:rustyline"]
+tui = ["dep:ratatui", "dep:crossterm"]
+
 [dependencies]
 spider-core = { workspace = true }
 
 # CLI
 clap = { workspace = true }
 colored = { workspace = true }
-rustyline = { workspace = true }
+rustyline = { workspace = true, optional = true }
 comfy-table = { workspace = true }
 
 # Serialization
@@ -30,3 +35,7 @@ csv = { workspace = true }
 atty = { workspace = true }
 anyhow = { workspace = true }
 directories = "6.0"
+
+# TUI (optional, gated behind "tui" feature)
+ratatui = { version = "0.29", optional = true }
+crossterm = { version = "0.28", optional = true }
