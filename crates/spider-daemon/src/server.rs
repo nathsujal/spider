@@ -9,7 +9,7 @@ use tokio::sync::Mutex;
 use tower_http::cors::CorsLayer;
 use tracing::info;
 
-use crate::routes::{bio, health, jobs, nodes, query};
+use crate::routes::{bio, health, jobs, nodes, query, traverse};
 use crate::ws::{self, Broadcaster};
 use crate::jobs::{JobQueue, Worker};
 
@@ -80,6 +80,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/ingest", post(jobs::ingest))
         .route("/jobs/:id/stream", get(jobs::handler))
         .route("/jobs/:id", get(jobs::get_job))
+        .route("/traverse/:node_id", get(traverse::handler))
         .with_state(state)
         .layer(CorsLayer::permissive())
 }
