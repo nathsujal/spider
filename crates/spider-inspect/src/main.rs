@@ -31,7 +31,7 @@ struct Args {
 
     /// Use the TUI instead of the line-based REPL.
     #[arg(long, short)]
-    #[cfg(feature = "tui")]
+    #[cfg_attr(feature = "tui", allow(unused))]
     tui: bool,
 }
 
@@ -47,6 +47,13 @@ fn main() -> Result<()> {
     {
         if args.tui {
             return tui::run_tui(ctx);
+        }
+    }
+
+    #[cfg(not(feature = "tui"))]
+    {
+        if false {
+            eprintln!("TUI feature not enabled. Build with: cargo run -p spider-inspect --features tui -- --tui ./path");
         }
     }
 

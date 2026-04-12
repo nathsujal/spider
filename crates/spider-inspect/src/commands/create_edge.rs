@@ -7,6 +7,7 @@ use spider_core::schema::edge::EdgeTypeId;
 use crate::commands::Status;
 use crate::context::Context;
 use crate::output;
+use crate::output_globals;
 
 pub fn run(ctx: &mut Context, args: &[&str]) -> Result<Status> {
     if args.len() < 3 {
@@ -36,6 +37,8 @@ pub fn run(ctx: &mut Context, args: &[&str]) -> Result<Status> {
     )?;
 
     output::print_ok(&format!("Created edge #{} ({} → {} [{}])", edge_id.get(), src_id, dst_id, edge_type));
+    output_globals::set_tree_view(format!("Created edge #{}\n{} → {} [{}]\nUse 'graph {}' to visualize", edge_id.get(), src_id, dst_id, edge_type, src_id));
+    output_globals::set_node_id(edge_id.get());
     Ok(Status::Continue)
 }
 

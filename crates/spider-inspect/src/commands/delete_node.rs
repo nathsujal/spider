@@ -10,6 +10,7 @@ use spider_core::query::traverse::get_relationships;
 use crate::commands::Status;
 use crate::context::Context;
 use crate::output;
+use crate::output_globals;
 
 pub fn run(ctx: &mut Context, args: &[&str]) -> Result<Status> {
     if args.is_empty() {
@@ -42,5 +43,6 @@ pub fn run(ctx: &mut Context, args: &[&str]) -> Result<Status> {
     db.nodes.set(id - 1, &tombstone)?;
 
     output::print_ok(&format!("Deleted node #{}", id));
+    output_globals::set_tree_view(format!("Deleted node #{}\nUse 'validate' to check integrity", id));
     Ok(Status::Continue)
 }

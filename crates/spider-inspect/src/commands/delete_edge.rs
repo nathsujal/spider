@@ -6,6 +6,7 @@ use spider_core::db::rels::EdgeId;
 use crate::commands::Status;
 use crate::context::Context;
 use crate::output;
+use crate::output_globals;
 
 pub fn run(ctx: &mut Context, args: &[&str]) -> Result<Status> {
     if args.is_empty() {
@@ -19,5 +20,6 @@ pub fn run(ctx: &mut Context, args: &[&str]) -> Result<Status> {
     ctx.db.edge_ops().delete(edge_id)?;
 
     output::print_ok(&format!("Deleted edge #{}", id));
+    output_globals::set_tree_view(format!("Deleted edge #{}\nUse 'validate' to check integrity", id));
     Ok(Status::Continue)
 }

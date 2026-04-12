@@ -6,6 +6,7 @@ use spider_core::schema::node::{LabelId, Node};
 use crate::commands::Status;
 use crate::context::Context;
 use crate::output;
+use crate::output_globals;
 
 pub fn run(ctx: &mut Context, args: &[&str]) -> Result<Status> {
     if args.is_empty() {
@@ -43,6 +44,8 @@ pub fn run(ctx: &mut Context, args: &[&str]) -> Result<Status> {
     }
 
     output::print_ok(&format!("Created node #{} with label [{}]", node_id, label));
+    output_globals::set_tree_view(format!("Created node #{}\nLabel: {}\nUse 'show {}' for details", node_id, label, node_id));
+    output_globals::set_node_id(node_id);
     Ok(Status::Continue)
 }
 

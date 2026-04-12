@@ -13,6 +13,7 @@ use spider_core::schema::token::TokenId;
 use crate::commands::Status;
 use crate::context::Context;
 use crate::output;
+use crate::output_globals;
 
 const MAX_NEIGHBORS_PER_HOP: usize = 20;
 
@@ -103,6 +104,15 @@ pub fn run(ctx: &mut Context, args: &[&str]) -> Result<Status> {
     println!();
     println!("{}", format!("Subgraph around Node #{} (depth={}, {} nodes, {} edges)", id, depth, node_info.len(), all_edges.len()).bold());
     println!("{}", "─".repeat(70));
+
+    // Update TUI graph view.
+    let mut tree_text = format!("Subgraph: Node #{}\n", id);
+    tree_text += &format!("Depth: {}, Nodes: {}, Edges: {}\n\n", depth, node_info.len(), all_edges.len());
+    for (src, type_name, tgt) in &all_edges {
+        tree_text += &format!("  #{} ──{}──▶ #{}\n", src, type_name, tgt);
+    }
+    output_globals::set_tree_view(tree_text);
+    output_globals::set_node_id(id);
 
     if let Some(info) = node_info.get(&id) {
         print_node_box(id, info, "ROOT");

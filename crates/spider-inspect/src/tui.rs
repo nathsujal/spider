@@ -40,6 +40,10 @@ pub struct AppState {
     pub tree_view: String,
     /// Current command input buffer.
     pub input: String,
+    /// Command history (up arrow).
+    pub history: Vec<String>,
+    /// History navigation index.
+    pub history_idx: usize,
     /// Database path for display.
     pub db_path: String,
     /// Node count.
@@ -60,6 +64,8 @@ impl AppState {
             ],
             tree_view: "No node inspected yet.\n\nUse 'show <id>' or 'tree <doc_id>' to inspect.".to_string(),
             input: String::new(),
+            history: Vec::new(),
+            history_idx: 0,
             db_path: db_path.to_string(),
             node_count: 0,
             edge_count: 0,
@@ -199,6 +205,17 @@ fn run_app<B: ratatui::backend::Backend>(
                 KeyCode::Enter => {
                     let cmd = app_rc.borrow().input.trim().to_string();
                     if !cmd.is_empty() {
+                        // Add to history.
+                        {
+                            let mut app = app_rc.borrow_mut();
+                            app.history.push(cmd.clone());
+                            // Keep last 50 commands.
+                            if app.history.len() > 50 {
+                                app.history.remove(0);
+                            }
+                            app.history_idx = app.history.len();
+                        }
+
                         app_rc.borrow_mut().clear_output();
                         app_rc.borrow_mut().append_output(&format!("> {}", cmd));
 
@@ -209,19 +226,42 @@ fn run_app<B: ratatui::backend::Backend>(
                     app_rc.borrow_mut().input.clear();
                 }
                 KeyCode::Up => {
-                    if app_rc.borrow().scroll > 0 {
-                        app_rc.borrow_mut().scroll -= 1;
+                    let mut app = app_rc.borrow_mut();
+                    if !app.history.is_empty() {
+                        if app.history_idx == 0 {
+                            app.history_idx = app.history.len();
+                        }
+                        if app.history_idx > 0 {
+                            app.history_idx -= 1;
+                            app.input = app.history[app.history_idx].clone();
+                        }
                     }
                 }
                 KeyCode::Down => {
-                    let len = app_rc.borrow().output_lines.len();
-                    if app_rc.borrow().scroll < len.saturating_sub(1) {
-                        app_rc.borrow_mut().scroll += 1;
+                    let mut app = app_rc.borrow_mut();
+                    if app.history_idx < app.history.len() {
+                        app.history_idx += 1;
+                        if app.history_idx < app.history.len() {
+                            app.input = app.history[app.history_idx].clone();
+                        } else {
+                            app.input.clear();
+                        }
+                    } else {
+                        app.input.clear();
                     }
                 }
                 KeyCode::Esc | KeyCode::Char('q') if app_rc.borrow().input.is_empty() => {
                     app_rc.borrow_mut().append_output("bye");
                     return Ok(());
+                }
+                KeyCode::PageUp => {
+                    app_rc.borrow_mut().scroll = app_rc.borrow().scroll.saturating_sub(20);
+                }
+                KeyCode::PageDown => {
+                    let len = app_rc.borrow().output_lines.len();
+                    let display_lines = 30;
+                    let max_scroll = len.saturating_sub(display_lines);
+                    app_rc.borrow_mut().scroll = (app_rc.borrow().scroll + 20).min(max_scroll);
                 }
                 _ => {}
             }
@@ -278,7 +318,7 @@ fn ui(frame: &mut ratatui::Frame, app: &AppState) {
         .title(" Output ")
         .borders(Borders::ALL)
         .style(Style::default().fg(Color::Cyan));
-    let display_lines = app.output_lines.len().min(50);
+    let display_lines = 30;
     let start = app.scroll.min(app.output_lines.len().saturating_sub(display_lines));
     let end = (start + display_lines).min(app.output_lines.len());
     let visible_lines: Vec<Line> = app.output_lines[start..end]
