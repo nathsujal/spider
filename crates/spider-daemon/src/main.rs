@@ -1,5 +1,7 @@
+mod events;
 mod routes;
 mod server;
+mod ws;
 
 use anyhow::Result;
 use clap::Parser;

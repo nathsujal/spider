@@ -1,7 +1,7 @@
 use axum::{
-    routing::{get, Router},
+    routing::get,
+    Router,
 };
-use serde::Serialize;
 use spider_core::db::lifecycle::Spider;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -9,9 +9,11 @@ use tokio::sync::Mutex;
 use tower_http::cors::CorsLayer;
 use tracing::info;
 
-use crate::routes::{bio, health, nodes, query};
+use crate::routes::{bio, health, jobs, nodes, query};
+use crate::ws::{self, Broadcaster};
 
-/// Shared application state — holds the Spider database handle behind a mutex.
+/// Shared application state — holds the Spider database handle behind a mutex
+/// and the WebSocket event broadcaster.
 ///
 /// We use `Arc<Mutex<Spider>>` because:
 /// - `Spider` is not `Send` (mmap handles are tied to the thread that opened them)
@@ -22,10 +24,22 @@ use crate::routes::{bio, health, nodes, query};
 #[derive(Clone)]
 pub struct AppState {
     pub db: Arc<Mutex<Spider>>,
+    pub broadcaster: Arc<Broadcaster>,
+}
+
+#[cfg(test)]
+impl AppState {
+    /// Create an AppState suitable for tests — empty DB and no-op broadcaster.
+    pub fn test(db: Spider) -> Self {
+        Self {
+            db: Arc::new(Mutex::new(db)),
+            broadcaster: Arc::new(Broadcaster::new()),
+        }
+    }
 }
 
 /// Response payload for the health check endpoint.
-#[derive(Serialize)]
+#[derive(serde::Serialize)]
 pub struct HealthResponse {
     pub status: &'static str,
     pub version: &'static str,
@@ -40,14 +54,19 @@ pub fn build_router(state: AppState) -> Router {
         .route("/nodes", get(nodes::list_nodes))
         .route("/bio", get(bio::handler))
         .route("/search", get(query::handler))
+        .route("/ws", get(ws::broadcaster::handler))
+        .route("/jobs/:id/stream", get(jobs::handler))
         .with_state(state)
         .layer(CorsLayer::permissive())
 }
 
 /// Start the HTTP server and block until shutdown.
 pub async fn run(db: Spider, addr: SocketAddr) -> anyhow::Result<()> {
+    let broadcaster = Arc::new(Broadcaster::new());
+
     let state = AppState {
         db: Arc::new(Mutex::new(db)),
+        broadcaster,
     };
 
     let app = build_router(state);

@@ -177,9 +177,7 @@ mod tests {
     use spider_core::db::ingest;
     use spider_core::db::ingest::{Entity, IngestRequest, Proposition};
     use spider_core::schema::node::{LabelId, Node};
-    use std::sync::Arc;
     use std::time::{SystemTime, UNIX_EPOCH};
-    use tokio::sync::Mutex;
 
     fn now_secs() -> u32 {
         SystemTime::now()
@@ -210,9 +208,7 @@ mod tests {
         // Manual node creation doesn't update it, so we must set it ourselves.
         db.metadata.next_node_id = 4;
 
-        let state = AppState {
-            db: Arc::new(Mutex::new(db)),
-        };
+        let state = AppState::test(db);
 
         let resp = handler(
             axum::extract::Query(SearchQuery {
@@ -240,9 +236,7 @@ mod tests {
         db.nodes.append(&[node]).unwrap();
         db.metadata.next_node_id = 2;
 
-        let state = AppState {
-            db: Arc::new(Mutex::new(db)),
-        };
+        let state = AppState::test(db);
 
         let resp = handler(
             axum::extract::Query(SearchQuery {
@@ -277,9 +271,7 @@ mod tests {
         };
         ingest::index(&mut db, &req).unwrap();
 
-        let state = AppState {
-            db: Arc::new(Mutex::new(db)),
-        };
+        let state = AppState::test(db);
 
         let resp = handler(
             axum::extract::Query(SearchQuery {
@@ -310,9 +302,7 @@ mod tests {
         };
         ingest::index(&mut db, &req).unwrap();
 
-        let state = AppState {
-            db: Arc::new(Mutex::new(db)),
-        };
+        let state = AppState::test(db);
 
         let resp = handler(
             axum::extract::Query(SearchQuery {
@@ -333,9 +323,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let db = Spider::open(dir.path()).unwrap();
 
-        let state = AppState {
-            db: Arc::new(Mutex::new(db)),
-        };
+        let state = AppState::test(db);
 
         let result = handler(
             axum::extract::Query(SearchQuery {
@@ -371,9 +359,7 @@ mod tests {
         };
         ingest::index(&mut db, &req).unwrap();
 
-        let state = AppState {
-            db: Arc::new(Mutex::new(db)),
-        };
+        let state = AppState::test(db);
 
         // Search for nodes with label ENTITY and property name=Mumbai.
         let resp = handler(

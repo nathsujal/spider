@@ -102,9 +102,7 @@ mod tests {
     use super::*;
     use spider_core::db::lifecycle::Spider;
     use spider_core::schema::node::{LabelId, Node};
-    use std::sync::Arc;
     use std::time::{SystemTime, UNIX_EPOCH};
-    use tokio::sync::Mutex;
 
     fn now_secs() -> u32 {
         SystemTime::now()
@@ -135,9 +133,7 @@ mod tests {
         n3.access_count = 100;
         db.nodes.append(&[n3]).unwrap();
 
-        let state = AppState {
-            db: Arc::new(Mutex::new(db)),
-        };
+        let state = AppState::test(db);
 
         let resp = handler(
             axum::extract::Query(BioQuery { limit: 10 }),
@@ -172,9 +168,7 @@ mod tests {
             db.nodes.append(&[node]).unwrap();
         }
 
-        let state = AppState {
-            db: Arc::new(Mutex::new(db)),
-        };
+        let state = AppState::test(db);
 
         let resp = handler(
             axum::extract::Query(BioQuery { limit: 3 }),
@@ -191,9 +185,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let db = Spider::open(dir.path()).unwrap();
 
-        let state = AppState {
-            db: Arc::new(Mutex::new(db)),
-        };
+        let state = AppState::test(db);
 
         let resp = handler(
             axum::extract::Query(BioQuery { limit: 20 }),
@@ -222,9 +214,7 @@ mod tests {
         // Delete node 3 (index 2).
         db.nodes.set(2, &Node::empty()).unwrap();
 
-        let state = AppState {
-            db: Arc::new(Mutex::new(db)),
-        };
+        let state = AppState::test(db);
 
         let resp = handler(
             axum::extract::Query(BioQuery { limit: 20 }),

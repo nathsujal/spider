@@ -182,9 +182,7 @@ mod tests {
     use super::*;
     use spider_core::db::lifecycle::Spider;
     use spider_core::schema::node::{LabelId, Node};
-    use std::sync::Arc;
     use std::time::{SystemTime, UNIX_EPOCH};
-    use tokio::sync::Mutex;
 
     fn now_secs() -> u32 {
         SystemTime::now()
@@ -204,9 +202,7 @@ mod tests {
         let node = Node::new(1, &[LabelId::new(lid.get()).unwrap()], now, None).unwrap();
         db.nodes.append(&[node]).unwrap();
 
-        let state = AppState {
-            db: Arc::new(Mutex::new(db)),
-        };
+        let state = AppState::test(db);
         (state, dir)
     }
 
@@ -257,9 +253,7 @@ mod tests {
             db.nodes.append(&[node]).unwrap();
         }
 
-        let state = AppState {
-            db: Arc::new(Mutex::new(db)),
-        };
+        let state = AppState::test(db);
 
         let mut guard = state.db.lock().await;
         let resp = list_nodes_inner(&mut guard, 100, 0);
@@ -286,9 +280,7 @@ mod tests {
         let tombstone = Node::empty();
         db.nodes.set(1, &tombstone).unwrap();
 
-        let state = AppState {
-            db: Arc::new(Mutex::new(db)),
-        };
+        let state = AppState::test(db);
 
         let mut guard = state.db.lock().await;
         let resp = list_nodes_inner(&mut guard, 100, 0);
@@ -313,9 +305,7 @@ mod tests {
             db.nodes.append(&[node]).unwrap();
         }
 
-        let state = AppState {
-            db: Arc::new(Mutex::new(db)),
-        };
+        let state = AppState::test(db);
 
         let mut guard = state.db.lock().await;
         // Offset 5, limit 3 → nodes 6, 7, 8
@@ -331,9 +321,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let db = Spider::open(dir.path()).unwrap();
 
-        let state = AppState {
-            db: Arc::new(Mutex::new(db)),
-        };
+        let state = AppState::test(db);
 
         let mut guard = state.db.lock().await;
         let resp = list_nodes_inner(&mut guard, 100, 0);

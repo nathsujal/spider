@@ -26,17 +26,13 @@ pub async fn handler(
 mod tests {
     use super::*;
     use spider_core::db::lifecycle::Spider;
-    use std::sync::Arc;
-    use tokio::sync::Mutex;
 
     #[tokio::test]
     async fn health_returns_ok() {
         let dir = tempfile::tempdir().unwrap();
         let db = Spider::open(dir.path()).unwrap();
         let db_path = db.path().to_string_lossy().to_string();
-        let state = AppState {
-            db: Arc::new(Mutex::new(db)),
-        };
+        let state = AppState::test(db);
 
         let response = handler(State(state)).await;
         assert_eq!(response.status, "ok");
