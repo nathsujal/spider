@@ -8,6 +8,7 @@
 /// in both environments.
 pub trait OutputSink {
     /// Print a plain line to output.
+    #[allow(dead_code)]
     fn print_line(&mut self, line: &str);
 
     /// Print an error message (typically styled red).

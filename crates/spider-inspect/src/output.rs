@@ -3,7 +3,7 @@
 use colored::Colorize;
 use comfy_table::{Table, Attribute, Cell, Row};
 
-// --- Formatting helpers (used by both REPL and TUI) ---
+// Formatting helpers (used by both REPL and TUI)
 
 /// Builds a styled table with the given headers and rows.
 pub fn make_table(headers: &[&str], rows: Vec<Vec<String>>) -> Table {
@@ -152,12 +152,11 @@ pub fn set_string_prop(
     Ok(())
 }
 
-// --- Re-exports for backward compatibility with existing command imports ---
+// Re-exports for backward compatibility with existing command imports
 // These route through the global sink so commands don't need signature changes.
 
 pub use crate::output_globals::{
-    print_error, print_line, print_ok, print_paged_table, print_table,
-    set_node_id, set_tree_view,
+    print_error, print_ok, print_paged_table,
 };
 // `make_table` is already `pub` above; commands that import `output::table`
 // get the function directly.

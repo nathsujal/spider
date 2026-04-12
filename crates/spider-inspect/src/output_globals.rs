@@ -5,7 +5,7 @@ use crate::output::make_table;
 use colored::Colorize;
 use std::io::{self, Write};
 
-// --- StdoutSink defined here to avoid circular deps ---
+// StdoutSink defined here to avoid circular deps
 
 /// Output sink that prints to stdout with colors.
 pub struct StdoutSink;
@@ -67,7 +67,7 @@ impl OutputSink for StdoutSink {
     }
 }
 
-// --- Thread-local sink management ---
+// Thread-local sink management
 
 thread_local! {
     static CURRENT_SINK: std::cell::RefCell<Box<dyn OutputSink>> =
@@ -91,6 +91,7 @@ pub fn set_sink(sink: Box<dyn OutputSink>) {
 
 /// Convenience wrappers so commands can keep using the existing API.
 
+#[allow(dead_code)]
 pub fn print_line(line: &str) {
     with_sink(|s| s.print_line(line));
 }
@@ -103,6 +104,7 @@ pub fn print_ok(msg: &str) {
     with_sink(|s| s.print_ok(msg));
 }
 
+#[allow(dead_code)]
 pub fn print_table(headers: &[&str], rows: Vec<Vec<String>>) {
     with_sink(|s| s.print_table(headers, rows));
 }

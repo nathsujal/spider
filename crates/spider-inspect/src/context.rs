@@ -25,6 +25,7 @@ impl Context {
     }
 
     /// Returns a human-readable label for the database location.
+    #[allow(dead_code)]
     pub fn db_label(&self) -> &str {
         self.db.path().file_name()
             .and_then(|n| n.to_str())
