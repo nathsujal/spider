@@ -7,12 +7,13 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 use tracing::info;
 
-use super::{Job, JobResult, JobStatus};
+use super::Job;
 
 /// Payload submitted into the job queue.
 pub struct JobSubmission {
     pub id: u64,
     pub file_path: String,
+    #[allow(dead_code)]
     pub title: Option<String>,
 }
 
@@ -73,6 +74,7 @@ impl JobQueue {
     }
 
     /// List all jobs with their current status.
+    #[allow(dead_code)]
     pub async fn list(&self) -> Vec<Job> {
         let jobs = self.jobs.lock().await;
         let mut jobs: Vec<_> = jobs.values().cloned().collect();
@@ -92,11 +94,13 @@ impl JobQueue {
     }
 
     /// Return the shared job store for the worker to access directly.
+    #[allow(dead_code)]
     pub fn jobs_store(&self) -> Arc<Mutex<HashMap<u64, Job>>> {
         Arc::clone(&self.jobs)
     }
 
     /// Return the total number of tracked jobs.
+    #[allow(dead_code)]
     pub async fn count(&self) -> usize {
         self.jobs.lock().await.len()
     }
@@ -105,6 +109,7 @@ impl JobQueue {
     ///
     /// This signals to the worker that no more jobs will be submitted,
     /// allowing `Worker::run()` to exit after processing remaining jobs.
+    #[allow(dead_code)]
     pub async fn close(&self) {
         self.tx.lock().await.take();
     }
@@ -115,6 +120,7 @@ impl JobQueue {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::jobs::{JobResult, JobStatus};
 
     fn make_queue() -> (JobQueue, mpsc::Receiver<JobSubmission>) {
         JobQueue::new()

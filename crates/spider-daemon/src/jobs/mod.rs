@@ -117,6 +117,7 @@ impl Job {
     }
 
     /// Transition the job to Failed with an error message.
+    #[allow(dead_code)]
     pub fn fail(&mut self, error: String) {
         self.status = JobStatus::Failed;
         self.updated_at = now_unix_ms();
@@ -124,6 +125,7 @@ impl Job {
     }
 
     /// Whether the job has reached a terminal state.
+    #[allow(dead_code)]
     pub fn is_terminal(&self) -> bool {
         matches!(self.status, JobStatus::Complete | JobStatus::Failed)
     }

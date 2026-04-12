@@ -75,6 +75,7 @@ impl Broadcaster {
     }
 
     /// Return the current number of connected clients.
+    #[allow(dead_code)]
     pub async fn client_count(&self) -> u64 {
         *self.client_count.lock().await
     }

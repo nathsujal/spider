@@ -1,6 +1,7 @@
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
+        Multipart,
         Path,
         State,
     },
@@ -12,9 +13,118 @@ use futures::StreamExt;
 use tokio::sync::broadcast;
 use tracing::{info, warn};
 
-use crate::events::TraceEvent;
 use crate::server::AppState;
 use crate::ws::Broadcaster;
+
+// ── POST /ingest ─────────────────────────────────────────────────────────────
+
+/// Response payload for `POST /ingest`.
+#[derive(serde::Serialize, Debug)]
+pub struct IngestResponse {
+    pub job_id: u64,
+    pub status: String,
+}
+
+/// `POST /ingest` — upload a document for ingestion.
+///
+/// Accepts a multipart form with:
+/// - `file` (required) — the document file (PDF, TXT, etc.)
+/// - `title` (optional) — human-readable title for the document
+///
+/// Returns immediately with a `job_id`. The ingestion runs asynchronously
+/// in the background worker. Track progress via `GET /jobs/:id` or
+/// `GET /jobs/:id/stream`.
+pub async fn ingest(
+    State(state): State<AppState>,
+    mut multipart: Multipart,
+) -> Result<Json<IngestResponse>, (StatusCode, String)> {
+    let mut file_bytes: Option<Vec<u8>> = None;
+    let mut file_name: Option<String> = None;
+    let mut title: Option<String> = None;
+
+    // Parse multipart fields.
+    while let Some(field) = multipart.next_field().await.map_err(|e| {
+        (StatusCode::BAD_REQUEST, format!("failed to read multipart field: {e}"))
+    })? {
+        let name = field.name().unwrap_or("").to_string();
+        match name.as_str() {
+            "file" => {
+                file_name = field.file_name().map(|s| s.to_string());
+                file_bytes = Some(
+                    field
+                        .bytes()
+                        .await
+                        .map_err(|e| (StatusCode::BAD_REQUEST, format!("failed to read file bytes: {e}")))?
+                        .to_vec(),
+                );
+            }
+            "title" => {
+                title = field
+                    .text()
+                    .await
+                    .ok()
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty());
+            }
+            _ => {
+                // Ignore unknown fields.
+            }
+        }
+    }
+
+    let file_bytes = match file_bytes {
+        Some(bytes) => bytes,
+        None => return Err((StatusCode::BAD_REQUEST, "missing required field: file".into())),
+    };
+
+    // Determine file name for logging.
+    let original_name = file_name.unwrap_or_else(|| "unknown".into());
+
+    // Write uploaded file to a temp location.
+    let upload_dir = std::env::temp_dir().join("spider-ingest");
+    let _ = std::fs::create_dir_all(&upload_dir);
+
+    // Use a UUID-like name to avoid collisions.
+    let file_id = uuid_simple();
+    let file_path = upload_dir.join(format!("{file_id}_{original_name}"));
+
+    std::fs::write(&file_path, &file_bytes)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("failed to write uploaded file: {e}")))?;
+
+    let file_path_str = file_path.to_string_lossy().to_string();
+
+    info!(file_path = %file_path_str, title, "file uploaded, creating job");
+
+    // Create the ingestion job.
+    let job_id = state.job_queue.submit(file_path_str.clone(), title).await;
+
+    info!(job_id, "ingestion job created");
+
+    Ok(Json(IngestResponse {
+        job_id,
+        status: "queued".into(),
+    }))
+}
+
+/// Generate a simple unique ID without external dependencies.
+fn uuid_simple() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    // Mix in a thread-local counter to reduce collision risk.
+    use std::cell::Cell;
+    thread_local! {
+        static COUNTER: Cell<u64> = const { Cell::new(0) };
+    }
+    let counter = COUNTER.with(|c| {
+        let v = c.get().wrapping_add(1);
+        c.set(v);
+        v
+    });
+    format!("{:x}_{:x}", ts, counter)
+}
 
 // ── GET /jobs/:id ────────────────────────────────────────────────────────────
 
@@ -147,7 +257,7 @@ async fn handle_stream(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::TraceKind;
+    use crate::events::{TraceEvent, TraceKind};
 
     #[tokio::test]
     async fn job_stream_filters_by_job_id() {

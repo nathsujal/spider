@@ -1,5 +1,5 @@
 use axum::{
-    routing::get,
+    routing::{get, post},
     Router,
 };
 use spider_core::db::lifecycle::Spider;
@@ -77,6 +77,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/bio", get(bio::handler))
         .route("/search", get(query::handler))
         .route("/ws", get(ws::broadcaster::handler))
+        .route("/ingest", post(jobs::ingest))
         .route("/jobs/:id/stream", get(jobs::handler))
         .route("/jobs/:id", get(jobs::get_job))
         .with_state(state)
@@ -89,16 +90,20 @@ pub async fn run(db: Spider, addr: SocketAddr) -> anyhow::Result<()> {
     let (job_queue, rx) = JobQueue::new();
     let job_queue = Arc::new(job_queue);
 
+    // Wrap the Spider DB in a mutex for shared access.
+    let db = Arc::new(Mutex::new(db));
+
     // Spawn the background worker — it owns the receiver and processes jobs.
     let worker = Worker::new(
         rx,
         Arc::clone(&job_queue),
         Arc::clone(&broadcaster),
+        Arc::clone(&db),
     );
     tokio::spawn(worker.run());
 
     let state = AppState {
-        db: Arc::new(Mutex::new(db)),
+        db,
         broadcaster,
         job_queue,
     };
