@@ -11,6 +11,7 @@ use tracing::info;
 
 use crate::routes::{bio, health, jobs, nodes, query};
 use crate::ws::{self, Broadcaster};
+use crate::jobs::{JobQueue, Worker};
 
 /// Shared application state — holds the Spider database handle behind a mutex
 /// and the WebSocket event broadcaster.
@@ -25,16 +26,37 @@ use crate::ws::{self, Broadcaster};
 pub struct AppState {
     pub db: Arc<Mutex<Spider>>,
     pub broadcaster: Arc<Broadcaster>,
+    /// Queryable job queue — used by `POST /ingest` and `GET /jobs/:id` (Phase 4).
+    #[allow(dead_code)]
+    pub job_queue: Arc<JobQueue>,
 }
 
 #[cfg(test)]
 impl AppState {
     /// Create an AppState suitable for tests — empty DB and no-op broadcaster.
     pub fn test(db: Spider) -> Self {
+        let (queue, _rx) = JobQueue::new();
         Self {
             db: Arc::new(Mutex::new(db)),
             broadcaster: Arc::new(Broadcaster::new()),
+            job_queue: Arc::new(queue),
         }
+    }
+
+    /// Create an AppState with a specific job queue (for job endpoint tests).
+    pub fn test_with_queue(queue: Arc<JobQueue>) -> Self {
+        let db = Spider::open(&tempfile::tempdir().unwrap().path().join("test_db")).unwrap();
+        Self {
+            db: Arc::new(Mutex::new(db)),
+            broadcaster: Arc::new(Broadcaster::new()),
+            job_queue: queue,
+        }
+    }
+
+    /// Create an AppState with an empty job queue (for 404 tests).
+    pub fn test_default() -> Self {
+        let db = Spider::open(&tempfile::tempdir().unwrap().path().join("test_db")).unwrap();
+        Self::test(db)
     }
 }
 
@@ -56,6 +78,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/search", get(query::handler))
         .route("/ws", get(ws::broadcaster::handler))
         .route("/jobs/:id/stream", get(jobs::handler))
+        .route("/jobs/:id", get(jobs::get_job))
         .with_state(state)
         .layer(CorsLayer::permissive())
 }
@@ -63,10 +86,21 @@ pub fn build_router(state: AppState) -> Router {
 /// Start the HTTP server and block until shutdown.
 pub async fn run(db: Spider, addr: SocketAddr) -> anyhow::Result<()> {
     let broadcaster = Arc::new(Broadcaster::new());
+    let (job_queue, rx) = JobQueue::new();
+    let job_queue = Arc::new(job_queue);
+
+    // Spawn the background worker — it owns the receiver and processes jobs.
+    let worker = Worker::new(
+        rx,
+        Arc::clone(&job_queue),
+        Arc::clone(&broadcaster),
+    );
+    tokio::spawn(worker.run());
 
     let state = AppState {
         db: Arc::new(Mutex::new(db)),
         broadcaster,
+        job_queue,
     };
 
     let app = build_router(state);
