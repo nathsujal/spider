@@ -1,6 +1,6 @@
-//! Interactive REPL for inspecting Spider databases.
+//! Interactive TUI for inspecting Spider databases.
 //!
-//! Opens a database (default or user-specified) and provides commands
+//! Opens a database and provides a split-pane terminal UI
 //! for examining nodes, edges, properties, and bio scores.
 
 use anyhow::{Context as _, Result};
@@ -11,60 +11,29 @@ mod commands;
 mod context;
 mod output;
 mod output_globals;
-#[cfg(feature = "repl")]
-mod repl;
 mod sink;
-#[cfg(feature = "tui")]
 mod tui;
 
-/// Spider Inspect — Interactive REPL for debugging Spider databases.
+/// Spider Inspect — Interactive TUI for debugging Spider databases.
 #[derive(Parser, Debug)]
 #[command(
     name = "spider-inspect",
-    about = "Interactive REPL for debugging Spider databases",
+    about = "Interactive TUI for debugging Spider databases",
     long_about = None,
 )]
 struct Args {
     /// Path to the Spider database directory.
     /// If omitted, uses the platform default location.
     db_path: Option<PathBuf>,
-
-    /// Use the TUI instead of the line-based REPL.
-    #[arg(long, short)]
-    #[cfg_attr(feature = "tui", allow(unused))]
-    tui: bool,
 }
 
 fn main() -> Result<()> {
     let args = Args::parse();
 
     // Open database.
-    let db_path = args.db_path.clone();
-    let ctx = context::Context::open(db_path.as_deref())
+    let ctx = context::Context::open(args.db_path.as_deref())
         .with_context(|| "failed to open database")?;
 
-    #[cfg(feature = "tui")]
-    {
-        if args.tui {
-            return tui::run_tui(ctx);
-        }
-    }
-
-    #[cfg(not(feature = "tui"))]
-    {
-        if false {
-            eprintln!("TUI feature not enabled. Build with: cargo run -p spider-inspect --features tui -- --tui ./path");
-        }
-    }
-
-    #[cfg(feature = "repl")]
-    {
-        return repl::run(args.db_path);
-    }
-
-    #[allow(unreachable_code)]
-    {
-        eprintln!("No features enabled. Build with --features repl or --features tui");
-        Ok(())
-    }
+    // Launch the TUI.
+    tui::run_tui(ctx)
 }

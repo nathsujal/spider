@@ -58,8 +58,8 @@ impl AppState {
     pub fn new(db_path: &str) -> Self {
         Self {
             output_lines: vec![
-                "Spider Inspect — TUI mode".to_string(),
-                "Type commands and press Enter. Ctrl+C to quit.".to_string(),
+                "Spider Inspect — TUI".to_string(),
+                "Type commands and press Enter. q or Esc to quit.".to_string(),
                 "".to_string(),
             ],
             tree_view: "No node inspected yet.\n\nUse 'show <id>' or 'tree <doc_id>' to inspect.".to_string(),
@@ -94,10 +94,10 @@ impl AppState {
             if let Ok(node) = db.nodes.get(idx) {
                 if !node.is_deleted() { nodes += 1; }
             }
-            if idx < db.metadata.next_rel_id.saturating_sub(1) {
-                if let Ok(edge) = db.edges.get(idx) {
-                    if !edge.is_deleted() { edges += 1; }
-                }
+        }
+        for idx in 0..db.metadata.next_rel_id.saturating_sub(1) {
+            if let Ok(edge) = db.edges.get(idx) {
+                if !edge.is_deleted() { edges += 1; }
             }
         }
         self.node_count = nodes;
@@ -167,7 +167,10 @@ pub fn run_tui(mut ctx: Context) -> Result<()> {
     let mut app = AppState::new(&db_path);
     app.refresh_counts(&mut ctx);
 
-    let result = run_app(&mut terminal, &mut ctx, &mut app);
+    // Use a guard to ensure terminal is restored even on panic.
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        run_app(&mut terminal, &mut ctx, &mut app)
+    }));
 
     // Restore terminal.
     disable_raw_mode()?;
@@ -178,7 +181,11 @@ pub fn run_tui(mut ctx: Context) -> Result<()> {
     )?;
     terminal.show_cursor()?;
 
-    result
+    match result {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(e)) => Err(e),
+        Err(_) => Err(anyhow::anyhow!("TUI panicked")),
+    }
 }
 
 fn run_app<B: ratatui::backend::Backend>(
@@ -220,7 +227,11 @@ fn run_app<B: ratatui::backend::Backend>(
                         app_rc.borrow_mut().append_output(&format!("> {}", cmd));
 
                         // Execute command through normal dispatch.
-                        dispatch_command(ctx, &app_rc, &cmd);
+                        let status = dispatch_command(ctx, &app_rc, &cmd);
+                        if matches!(status, crate::commands::Status::Quit) {
+                            *app = Rc::try_unwrap(app_rc).unwrap().into_inner();
+                            return Ok(());
+                        }
                         app_rc.borrow_mut().refresh_counts(ctx);
                     }
                     app_rc.borrow_mut().input.clear();
@@ -251,7 +262,7 @@ fn run_app<B: ratatui::backend::Backend>(
                     }
                 }
                 KeyCode::Esc | KeyCode::Char('q') if app_rc.borrow().input.is_empty() => {
-                    app_rc.borrow_mut().append_output("bye");
+                    *app = Rc::try_unwrap(app_rc).unwrap().into_inner();
                     return Ok(());
                 }
                 KeyCode::PageUp => {
@@ -270,7 +281,7 @@ fn run_app<B: ratatui::backend::Backend>(
 }
 
 /// Dispatch a command string through the normal command parser.
-fn dispatch_command(ctx: &mut Context, app_rc: &Rc<RefCell<AppState>>, input: &str) {
+fn dispatch_command(ctx: &mut Context, app_rc: &Rc<RefCell<AppState>>, input: &str) -> crate::commands::Status {
     use crate::commands::Command;
     use crate::output_globals::set_sink;
 
@@ -278,11 +289,18 @@ fn dispatch_command(ctx: &mut Context, app_rc: &Rc<RefCell<AppState>>, input: &s
     set_sink(Box::new(TuiSink { state: Rc::clone(app_rc) }));
 
     if let Some((cmd, args)) = Command::parse(input) {
-        if let Err(e) = cmd.execute(ctx, &args) {
-            app_rc.borrow_mut().append_output(&format!("ERROR: {}", e));
+        match cmd.execute(ctx, &args) {
+            Ok(status) => status,
+            Err(e) => {
+                app_rc.borrow_mut().append_output(&format!("ERROR: {}", e));
+                crate::commands::Status::Continue
+            }
         }
     } else if !input.trim().is_empty() {
         app_rc.borrow_mut().append_output(&format!("unknown command: '{}'. Type 'help' for commands.", input));
+        crate::commands::Status::Continue
+    } else {
+        crate::commands::Status::Continue
     }
 }
 
@@ -338,7 +356,7 @@ fn ui(frame: &mut ratatui::Frame, app: &AppState) {
         .collect();
     let output_text = Paragraph::new(Text::from(visible_lines))
         .block(output_block)
-        .scroll((0, 0));
+        .scroll((start as u16, 0));
     frame.render_widget(output_text, top_chunks[1]);
 
     // Bottom bar.
