@@ -11,6 +11,7 @@ use spider_core::schema::token::TokenId;
 use crate::commands::Status;
 use crate::context::Context;
 use crate::output;
+use crate::output_globals;
 
 pub fn run(ctx: &mut Context, args: &[&str]) -> Result<Status> {
     if args.is_empty() {
@@ -97,6 +98,17 @@ pub fn run(ctx: &mut Context, args: &[&str]) -> Result<Status> {
                 child_prefix, ent_prefix, ent_type_name, ent_id, ent_name, ent_type);
         }
     }
+
+    // Update TUI graph view with the tree text.
+    // Reconstruct a simple tree view for the TUI.
+    let mut tree_text = format!("Document #{} \"{}\"\n", id, title);
+    tree_text += &format!("  Propositions: {}\n", prop_edges.len());
+    for (i, edge) in prop_edges.iter().enumerate() {
+        let prefix = if i == prop_edges.len() - 1 { "└──" } else { "├──" };
+        tree_text += &format!("  {} Proposition #{}\n", prefix, edge.target_id);
+    }
+    output_globals::set_tree_view(tree_text);
+    output_globals::set_node_id(id);
 
     println!();
     Ok(Status::Continue)

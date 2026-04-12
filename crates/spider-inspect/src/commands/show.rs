@@ -11,6 +11,7 @@ use spider_core::property::list_all;
 use crate::commands::Status;
 use crate::context::Context;
 use crate::output::{self, table};
+use crate::output_globals;
 
 pub fn run(ctx: &mut Context, args: &[&str]) -> Result<Status> {
     if args.is_empty() {
@@ -53,7 +54,7 @@ pub fn run(ctx: &mut Context, args: &[&str]) -> Result<Status> {
     // Summary.
     let sig = output::format_significance(node.significance);
     let summary_rows = vec![
-        vec!["Labels".to_string(), labels_str],
+        vec!["Labels".to_string(), labels_str.clone()],
         vec!["Created".to_string(), output::format_timestamp(node.created_at)],
         vec!["Last accessed".to_string(), output::format_timestamp(node.last_accessed_at)],
         vec!["Access count".to_string(), node.access_count.to_string()],
@@ -105,6 +106,22 @@ pub fn run(ctx: &mut Context, args: &[&str]) -> Result<Status> {
 
         println!("{}", table(&["ID", "Type", "Node", "Labels"], edge_rows));
     }
+
+    // Update TUI graph view.
+    let mut tree_text = format!("Node #{}\n", id);
+    tree_text += &format!("Labels: {}\n", &labels_str);
+    tree_text += &format!("Score:  {:.2} [{}]\n", score, spider_core::bio::tier::BioTier::from_score(score));
+    tree_text += &format!("Access: {}\n", node.access_count);
+    for e in &outgoing {
+        let type_name = if let Some(tid) = e.edge_type() {
+            output::resolve_edge_type(&mut ctx.db.edge_type_tokens, tid.get())
+        } else {
+            "?".to_string()
+        };
+        tree_text += &format!("  → {} → #{}\n", type_name, e.target_id);
+    }
+    output_globals::set_tree_view(tree_text);
+    output_globals::set_node_id(id);
 
     println!();
     Ok(Status::Continue)
