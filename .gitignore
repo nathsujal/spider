@@ -36,3 +36,6 @@ ClAUDE.md
 
 # Planning
 .planning/
+# Planning documents (local only)
+crates/spider-py/BRAINSTORMING.md
+crates/spider-py/TASKS.md
