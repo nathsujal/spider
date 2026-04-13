@@ -9,9 +9,11 @@ use pyo3::types::PyType;
 
 use spider_core::db::lifecycle::Spider;
 use spider_core::db::ingest;
+use spider_core::db::find;
 
 use crate::error::db_error_to_pyerr;
 use crate::ingest::{PyIngestRequest, PyIngestResult};
+use crate::types::PyNodeId;
 
 /// Python wrapper for the Spider database handle.
 ///
@@ -185,6 +187,96 @@ impl PySpider {
             let mut db = inner.lock();
             ingest::index(&mut db, &rust_request)
                 .map(PyIngestResult::from)
+                .map_err(db_error_to_pyerr)
+        })
+    }
+
+    // ========================================================================
+    // Find queries
+    // ========================================================================
+
+    /// Find all nodes with a given label.
+    ///
+    /// Performs a sequential scan over all nodes, checking if each live node
+    /// has the given label. Returns an empty list if the label has never been
+    /// used.
+    ///
+    /// Args:
+    ///     label: The label string to search for (e.g. "DOCUMENT", "ENTITY").
+    ///
+    /// Returns:
+    ///     list[NodeId]: A list of NodeId objects with the given label.
+    ///
+    /// Raises:
+    ///     SpiderIOError: If a file I/O error occurs during the scan.
+    ///     SpiderTraversalError: If a property chain exceeds the depth limit.
+    fn find_by_label(&self, py: Python<'_>, label: &str) -> PyResult<Vec<PyNodeId>> {
+        let inner = Arc::clone(&self.inner);
+
+        py.allow_threads(move || {
+            let mut db = inner.lock();
+            find::find_by_label(&mut db, label)
+                .map(|ids| ids.iter().map(|nid| PyNodeId::from(nid.get())).collect())
+                .map_err(db_error_to_pyerr)
+        })
+    }
+
+    /// Find all nodes with a property matching the given key and value.
+    ///
+    /// Performs a sequential scan over all nodes, checking each node's property
+    /// chain for a matching key/value pair. Only matches inline short strings
+    /// (<=6 bytes).
+    ///
+    /// Args:
+    ///     key: The property key (e.g. "name").
+    ///     value: The property value to match (e.g. "Mumbai").
+    ///
+    /// Returns:
+    ///     list[NodeId]: A list of NodeId objects with the matching property.
+    ///                   Returns an empty list if the key has never been used
+    ///                   or no matches are found.
+    ///
+    /// Raises:
+    ///     SpiderIOError: If a file I/O error occurs during the scan.
+    ///     SpiderTraversalError: If a property chain exceeds the depth limit.
+    fn find_by_property(&self, py: Python<'_>, key: &str, value: &str) -> PyResult<Vec<PyNodeId>> {
+        let inner = Arc::clone(&self.inner);
+
+        py.allow_threads(move || {
+            let mut db = inner.lock();
+            find::find_by_property(&mut db, key, value)
+                .map(|ids| ids.iter().map(|nid| PyNodeId::from(nid.get())).collect())
+                .map_err(db_error_to_pyerr)
+        })
+    }
+
+    /// Find the first node with a property matching the given key and value.
+    ///
+    /// Like `find_by_property`, but short-circuits on the first match.
+    /// Performs a sequential scan and returns immediately when a match is found.
+    ///
+    /// Args:
+    ///     key: The property key (e.g. "name").
+    ///     value: The property value to match (e.g. "Mumbai").
+    ///
+    /// Returns:
+    ///     NodeId | None: The first matching NodeId, or None if no match found.
+    ///
+    /// Raises:
+    ///     SpiderIOError: If a file I/O error occurs during the scan.
+    ///     SpiderTraversalError: If a property chain exceeds the depth limit.
+    fn find_one_by_property(
+        &self,
+        py: Python<'_>,
+        key: &str,
+        value: &str,
+    ) -> PyResult<Option<PyNodeId>> {
+        let inner = Arc::clone(&self.inner);
+
+        py.allow_threads(move || {
+            let mut db = inner.lock();
+            find::find_one_by_property(&mut db, key, value)
+                .map(|opt| opt.map(|nid| PyNodeId::from(nid.get())))
                 .map_err(db_error_to_pyerr)
         })
     }
