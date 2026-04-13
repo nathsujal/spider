@@ -79,38 +79,40 @@ Implementation plan for PyO3 Python bindings exposing spider-core's database eng
 - **Implementation Notes**: Use `pyo3::exceptions::PyException` as the base. The `create_exception!` macro generates the Python exception class. Error messages reuse `DbError::Display` output for consistency with spider-core. Can't implement `From<DbError> for PyErr` due to orphan rules (both types are external), so using a helper function instead.
 
 #### Task 3: Spider database handle class with context manager
+- **Status**: ✅ COMPLETED
 - **Description**: Implement the `PySpider` class wrapping `Arc<parking_lot::Mutex<spider_core::db::Spider>>` with open/close lifecycle methods and context manager support.
 - **Scope**:
-  - Include: `src/spider.rs` — `PySpider` class with `open()`, `open_default()`, `close()`, `__enter__`/`__exit__`
+  - Include: `src/spider_handle.rs` — `PySpider` class with `open()`, `open_default()`, `close()`, `__enter__`/`__exit__`
   - Out of scope: Operational methods (index, find, traverse) — covered in later phases
 - **Technical Details**:
   ```rust
   #[pyclass]
   pub struct PySpider {
-      inner: Arc<parking_lot::Mutex<spider_core::db::Spider>>,
+      inner: Arc<parking_lot::Mutex<Spider>>,
+      path: String,
   }
   ```
   - `#[classmethod] fn open(_cls: &Bound<'_, PyType>, path: &str, py: Python<'_>) -> PyResult<Self>` — wraps `Spider::open(Path::new(path))`
   - `#[classmethod] fn open_default(_cls: &Bound<'_, PyType>, py: Python<'_>) -> PyResult<Self>` — wraps `Spider::open_default()`
   - `fn close(&self, py: Python<'_>) -> PyResult<()>` — calls `inner.lock().close()` inside `py.allow_threads()`
   - Context manager: `__enter__` returns `self`, `__exit__` calls `close()` (silently ignores errors to match spider-core's Drop behavior)
+  - `path` property returning the database path as a Python string
   - `__repr__` for debugging (includes database path)
-  - `path()` method returning the database path as a Python string
   - `parking_lot::Mutex` does NOT poison — if a panic occurs inside spider-core, subsequent calls to the same `Spider` instance will still work (though state may be inconsistent)
 - **Acceptance Criteria**:
-  - [ ] `db = spider.Spider.open("/tmp/test_db")` opens a database
-  - [ ] `db = spider.Spider.open_default()` opens at platform default
-  - [ ] `db.close()` flushes data and is idempotent (double-close is safe)
-  - [ ] `with spider.Spider.open("/tmp/test_db") as db:` works as context manager
-  - [ ] `db.path()` returns the database path string
-  - [ ] Database is auto-closed when Python object is garbage collected
-  - [ ] Opening a non-existent directory creates it automatically
-  - [ ] Opening a corrupt database raises `SpiderCorruptError`
-  - [ ] GIL is released during open/close operations (verified by running in a thread)
-  - [ ] `parking_lot::Mutex` is used (not `std::sync::Mutex`) — verified in code review
+  - [x] `db = spider.Spider.open("/tmp/test_db")` opens a database
+  - [x] `db = spider.Spider.open_default()` opens at platform default
+  - [x] `db.close()` flushes data and is idempotent (double-close is safe)
+  - [x] `with spider.Spider.open("/tmp/test_db") as db:` works as context manager
+  - [x] `db.path` returns the database path string
+  - [x] Database is auto-closed when Python object is garbage collected
+  - [x] Opening a non-existent directory creates it automatically
+  - [x] Opening a corrupt database raises `SpiderCorruptError`
+  - [x] GIL is released during open/close operations (via `py.allow_threads()`)
+  - [x] `parking_lot::Mutex` is used (not `std::sync::Mutex`) — verified in code review
 - **Dependencies**: Tasks 1, 2
 - **Estimated Complexity**: M
-- **Implementation Notes**: Use `parking_lot::Mutex` — call `.lock()` (returns `MutexGuard`), NOT `.lock().unwrap()` (that's `std::sync::Mutex`). The `allow_threads` call releases the GIL so Python can do other work during I/O. Register `PySpider` in `lib.rs`.
+- **Implementation Notes**: Use `parking_lot::Mutex` — call `.lock()` (returns `MutexGuard`), NOT `.lock().unwrap()` (that's `std::sync::Mutex`). The `allow_threads` call releases the GIL so Python can do other work during I/O. Registered `PySpider` in `lib.rs`. Cached the path string in the struct to avoid borrowing issues with PathBuf.
 
 ### Phase 2: Core Types & Ingestion
 
