@@ -8,8 +8,10 @@ use pyo3::prelude::*;
 use pyo3::types::PyType;
 
 use spider_core::db::lifecycle::Spider;
+use spider_core::db::ingest;
 
 use crate::error::db_error_to_pyerr;
+use crate::ingest::{PyIngestRequest, PyIngestResult};
 
 /// Python wrapper for the Spider database handle.
 ///
@@ -151,5 +153,39 @@ impl PySpider {
     ///     str: A string like "Spider('/path/to/db')".
     fn __repr__(&self) -> String {
         format!("Spider('{}')", self.path)
+    }
+
+    /// Ingest a document with propositions into the database.
+    ///
+    /// Creates a Document node with the given title, proposition nodes for each
+    /// proposition, entity nodes (deduplicated by name), and wires CONTAINS +
+    /// MENTIONS edges between them.
+    ///
+    /// Args:
+    ///     request: An IngestRequest containing the document title and propositions.
+    ///
+    /// Returns:
+    ///     IngestResult: Contains the created document ID and counts of nodes/edges.
+    ///
+    /// Raises:
+    ///     SpiderIngestionError: If ingestion produces zero propositions.
+    ///     SpiderNotFoundError: If a referenced node is not found.
+    ///     SpiderIOError: If a file I/O error occurs.
+    fn index(&self, py: Python<'_>, request: &PyIngestRequest) -> PyResult<PyIngestResult> {
+        // Step 1: Clone Arc BEFORE GIL release (can't access self inside allow_threads)
+        let inner = Arc::clone(&self.inner);
+
+        // Step 2: Convert Python IngestRequest -> Rust IngestRequest<'_> BEFORE GIL release
+        // This builds &str slices pointing into Python-owned String fields.
+        // The borrow is valid for the duration of the method call.
+        let rust_request = request.to_rust();
+
+        // Step 3: Release GIL, lock mutex, call spider-core, convert result
+        py.allow_threads(move || {
+            let mut db = inner.lock();
+            ingest::index(&mut db, &rust_request)
+                .map(PyIngestResult::from)
+                .map_err(db_error_to_pyerr)
+        })
     }
 }
