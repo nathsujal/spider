@@ -11,10 +11,12 @@ use spider_core::db::lifecycle::Spider;
 use spider_core::db::ingest;
 use spider_core::db::find;
 use spider_core::query::traverse;
+use spider_core::bio::score;
+use spider_core::bio::tier::BioTier;
 
 use crate::error::db_error_to_pyerr;
 use crate::ingest::{PyIngestRequest, PyIngestResult};
-use crate::types::{PyDirection, PyNodeId};
+use crate::types::{PyBioTier, PyDirection, PyNodeId};
 
 /// Parse a direction from either a PyDirection enum or a string.
 ///
@@ -435,6 +437,70 @@ impl PySpider {
             let mut db = inner.lock();
             traverse::count_relationships(&mut db, node_id.into(), direction)
                 .map_err(db_error_to_pyerr)
+        })
+    }
+
+    // ========================================================================
+    // Bio scoring
+    // ========================================================================
+
+    /// Calculate the bio-inspired vitality score for a node.
+    ///
+    /// The bio score reflects a node's "memory strength" based on:
+    /// - Significance: Higher significance increases the score.
+    /// - Access frequency: More accesses increase the score (logarithmic).
+    /// - Recency: Older nodes have decaying scores (gravitational decay).
+    ///
+    /// Args:
+    ///     node_id: The NodeId to calculate the score for.
+    ///
+    /// Returns:
+    ///     float: The bio vitality score (positive number for live nodes).
+    ///
+    /// Raises:
+    ///     SpiderNotFoundError: If the node does not exist.
+    ///     SpiderIOError: If a file I/O error occurs.
+    fn get_bio_score(&self, py: Python<'_>, node_id: &PyNodeId) -> PyResult<f64> {
+        let inner = Arc::clone(&self.inner);
+        let nid = spider_core::db::nodes::NodeId::new(node_id.inner())
+            .map_err(db_error_to_pyerr)?;
+
+        py.allow_threads(move || {
+            let mut db = inner.lock();
+            // Get node: RecordFile uses 0-based index, NodeId is 1-based
+            let node = db.nodes.get(nid.get() - 1).map_err(db_error_to_pyerr)?;
+            Ok(score::calculate(&node))
+        })
+    }
+
+    /// Get the bio storage tier for a node.
+    ///
+    /// Tiers classify nodes by their vitality score:
+    ///     HOT: score > 20.0 (in RAM, instant access)
+    ///     WARM: score > 5.0 (on SSD, fast I/O)
+    ///     COLD: score > 0.0 (archived, slow access)
+    ///     PRUNED: score <= 0.0 (eligible for deletion)
+    ///
+    /// Args:
+    ///     node_id: The NodeId to classify.
+    ///
+    /// Returns:
+    ///     BioTier: The storage tier (Hot, Warm, Cold, or Pruned).
+    ///
+    /// Raises:
+    ///     SpiderNotFoundError: If the node does not exist.
+    ///     SpiderIOError: If a file I/O error occurs.
+    fn get_bio_tier(&self, py: Python<'_>, node_id: &PyNodeId) -> PyResult<PyBioTier> {
+        let inner = Arc::clone(&self.inner);
+        let nid = spider_core::db::nodes::NodeId::new(node_id.inner())
+            .map_err(db_error_to_pyerr)?;
+
+        py.allow_threads(move || {
+            let mut db = inner.lock();
+            // Get node: RecordFile uses 0-based index, NodeId is 1-based
+            let node = db.nodes.get(nid.get() - 1).map_err(db_error_to_pyerr)?;
+            let score_val = score::calculate(&node);
+            Ok(PyBioTier::from(BioTier::from_score(score_val)))
         })
     }
 }
