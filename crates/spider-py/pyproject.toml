@@ -8,6 +8,30 @@ version = "0.1.0"
 description = "Python bindings for Spider — bio-inspired AI agent memory graph"
 requires-python = ">=3.9"
 license = { text = "MIT" }
+readme = "README.md"
+authors = [
+    { name = "Sujal Nath", email = "nathsujal@gmail.com" }
+]
+keywords = ["graph-database", "ai-memory", "knowledge-graph", "pyo3", "rust"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Rust",
+    "Topic :: Database",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+[project.urls]
+Homepage = "https://github.com/nathsujal/spider"
+Repository = "https://github.com/nathsujal/spider"
+Documentation = "https://github.com/nathsujal/spider/tree/main/crates/spider-py"
 
 [tool.maturin]
 features = ["pyo3/extension-module"]
