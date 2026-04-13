@@ -10,10 +10,44 @@ use pyo3::types::PyType;
 use spider_core::db::lifecycle::Spider;
 use spider_core::db::ingest;
 use spider_core::db::find;
+use spider_core::query::traverse;
 
 use crate::error::db_error_to_pyerr;
 use crate::ingest::{PyIngestRequest, PyIngestResult};
-use crate::types::PyNodeId;
+use crate::types::{PyDirection, PyNodeId};
+
+/// Parse a direction from either a PyDirection enum or a string.
+///
+/// Accepts:
+/// - `PyDirection` (e.g. `spider.Direction.OUTGOING`)
+/// - `str` (case-insensitive: "outgoing", "incoming", "both")
+///
+/// Raises ValueError if the string is not a valid direction.
+fn parse_direction(value: &Bound<'_, PyAny>) -> PyResult<spider_core::db::rels::Direction> {
+    use spider_core::db::rels::Direction as RustDirection;
+
+    // Try PyDirection first
+    if let Ok(py_dir) = value.extract::<PyDirection>() {
+        return Ok(py_dir.inner());
+    }
+
+    // Try string
+    if let Ok(s) = value.extract::<&str>() {
+        return match s.to_lowercase().as_str() {
+            "outgoing" => Ok(RustDirection::Outgoing),
+            "incoming" => Ok(RustDirection::Incoming),
+            "both" => Ok(RustDirection::Both),
+            _ => Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "Invalid direction '{}'. Must be 'outgoing', 'incoming', or 'both', or a Direction enum value",
+                s
+            ))),
+        };
+    }
+
+    Err(pyo3::exceptions::PyTypeError::new_err(
+        "direction must be a Direction enum or a string ('outgoing', 'incoming', 'both')",
+    ))
+}
 
 /// Python wrapper for the Spider database handle.
 ///
@@ -277,6 +311,129 @@ impl PySpider {
             let mut db = inner.lock();
             find::find_one_by_property(&mut db, key, value)
                 .map(|opt| opt.map(|nid| PyNodeId::from(nid.get())))
+                .map_err(db_error_to_pyerr)
+        })
+    }
+
+    // ========================================================================
+    // Graph traversal
+    // ========================================================================
+
+    /// Get all neighbor nodes connected to the given node.
+    ///
+    /// Walks the edge chain from the specified node and returns all neighbors
+    /// in the given direction.
+    ///
+    /// Args:
+    ///     node_id: The NodeId to find neighbors for.
+    ///     direction: Traversal direction (OUTGOING, INCOMING, or BOTH).
+    ///                Can also be a string: "outgoing", "incoming", "both".
+    ///
+    /// Returns:
+    ///     list[Neighbor]: A list of Neighbor objects, each with node_id and edge_id.
+    ///
+    /// Raises:
+    ///     SpiderNotFoundError: If the node does not exist.
+    ///     SpiderTraversalError: If the edge chain exceeds the depth limit.
+    #[pyo3(signature = (node_id, direction))]
+    fn get_neighbors(
+        &self,
+        py: Python<'_>,
+        node_id: &PyNodeId,
+        direction: Bound<'_, PyAny>,
+    ) -> PyResult<Vec<crate::types::PyNeighbor>> {
+        let inner = Arc::clone(&self.inner);
+        let direction = parse_direction(&direction)?;
+
+        py.allow_threads(move || {
+            let mut db = inner.lock();
+            traverse::get_neighbors(&mut db, node_id.into(), direction)
+                .map(|neighbors| {
+                    neighbors
+                        .into_iter()
+                        .map(crate::types::PyNeighbor::from_rust)
+                        .collect()
+                })
+                .map_err(db_error_to_pyerr)
+        })
+    }
+
+    /// Get all relationships (edges) connected to the given node.
+    ///
+    /// Returns a list of dictionaries with edge details: source_id, target_id.
+    ///
+    /// Args:
+    ///     node_id: The NodeId to find relationships for.
+    ///     direction: Traversal direction (OUTGOING, INCOMING, or BOTH).
+    ///                Can also be a string: "outgoing", "incoming", "both".
+    ///
+    /// Returns:
+    ///     list[dict]: A list of dicts with keys: source_id, target_id.
+    ///
+    /// Raises:
+    ///     SpiderNotFoundError: If the node does not exist.
+    ///     SpiderTraversalError: If the edge chain exceeds the depth limit.
+    #[pyo3(signature = (node_id, direction))]
+    fn get_relationships<'py>(
+        &self,
+        py: Python<'py>,
+        node_id: &PyNodeId,
+        direction: Bound<'_, PyAny>,
+    ) -> PyResult<Vec<Bound<'py, pyo3::types::PyDict>>> {
+        let inner = Arc::clone(&self.inner);
+        let direction = parse_direction(&direction)?;
+
+        // Step 1: Get edge data (raw u32 values) OUTSIDE Python object creation
+        let edges: Vec<(u32, u32)> = py.allow_threads(move || {
+            let mut db = inner.lock();
+            traverse::get_relationships(&mut db, node_id.into(), direction)
+                .map(|edges| edges.iter().map(|e| (e.source_id, e.target_id)).collect())
+                .map_err(db_error_to_pyerr)
+        })?;
+
+        // Step 2: Convert raw values to Python dicts AFTER GIL release
+        let dicts: Vec<Bound<'py, pyo3::types::PyDict>> = edges
+            .iter()
+            .map(|(source_id, target_id)| {
+                let dict = pyo3::types::PyDict::new_bound(py);
+                dict.set_item("source_id", *source_id).unwrap();
+                dict.set_item("target_id", *target_id).unwrap();
+                dict
+            })
+            .collect();
+
+        Ok(dicts)
+    }
+
+    /// Count the number of relationships connected to the given node.
+    ///
+    /// More efficient than `get_relationships` when you only need the count,
+    /// as it doesn't allocate a Vec of edge records.
+    ///
+    /// Args:
+    ///     node_id: The NodeId to count relationships for.
+    ///     direction: Traversal direction (OUTGOING, INCOMING, or BOTH).
+    ///                Can also be a string: "outgoing", "incoming", "both".
+    ///
+    /// Returns:
+    ///     int: The number of relationships.
+    ///
+    /// Raises:
+    ///     SpiderNotFoundError: If the node does not exist.
+    ///     SpiderTraversalError: If the edge chain exceeds the depth limit.
+    #[pyo3(signature = (node_id, direction))]
+    fn count_relationships(
+        &self,
+        py: Python<'_>,
+        node_id: &PyNodeId,
+        direction: Bound<'_, PyAny>,
+    ) -> PyResult<usize> {
+        let inner = Arc::clone(&self.inner);
+        let direction = parse_direction(&direction)?;
+
+        py.allow_threads(move || {
+            let mut db = inner.lock();
+            traverse::count_relationships(&mut db, node_id.into(), direction)
                 .map_err(db_error_to_pyerr)
         })
     }

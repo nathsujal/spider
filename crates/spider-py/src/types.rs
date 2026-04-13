@@ -3,7 +3,8 @@
 use pyo3::prelude::*;
 
 use spider_core::db::nodes::NodeId;
-use spider_core::db::rels::EdgeId;
+use spider_core::db::rels::{Direction, EdgeId};
+use spider_core::query::traverse;
 
 // ============================================================================
 // PyNodeId
@@ -187,6 +188,19 @@ impl From<&PyEdgeId> for EdgeId {
     }
 }
 
+impl PyEdgeId {
+    /// Create a PyEdgeId from a raw u32 value (internal use only).
+    pub(crate) fn from(raw: u32) -> Self {
+        debug_assert!(raw != 0, "PyEdgeId::from called with 0");
+        PyEdgeId { inner: raw }
+    }
+
+    /// Return the underlying u32 value (for internal use).
+    pub(crate) fn inner(&self) -> u32 {
+        self.inner
+    }
+}
+
 // ============================================================================
 // PyDirection
 // ============================================================================
@@ -218,7 +232,7 @@ pub struct PyDirection {
 }
 
 // Re-export for internal use
-use spider_core::db::rels::Direction;
+// (Direction is already imported at the top of the file)
 
 #[pymethods]
 impl PyDirection {
@@ -292,6 +306,64 @@ impl PyDirection {
 impl From<&PyDirection> for Direction {
     fn from(py_dir: &PyDirection) -> Self {
         py_dir.inner
+    }
+}
+
+impl PyDirection {
+    /// Return the underlying Direction value (for internal use).
+    pub(crate) fn inner(&self) -> Direction {
+        self.inner
+    }
+}
+
+// ============================================================================
+// PyNeighbor
+// ============================================================================
+
+/// A neighbor node returned by graph traversal.
+///
+/// Contains the neighbor's NodeId and the EdgeId that connects to it.
+///
+/// Example:
+/// ```python
+/// neighbor = neighbors[0]
+/// print(neighbor.node_id)   # NodeId(42)
+/// print(neighbor.edge_id)   # EdgeId(7)
+/// ```
+#[pyclass]
+#[derive(Clone, Copy)]
+pub struct PyNeighbor {
+    #[pyo3(get)]
+    pub node_id: PyNodeId,
+    #[pyo3(get)]
+    pub edge_id: PyEdgeId,
+}
+
+#[pymethods]
+impl PyNeighbor {
+    /// Return a debug representation.
+    fn __repr__(&self) -> String {
+        format!(
+            "Neighbor(node_id={}, edge_id={})",
+            self.node_id.inner(),
+            self.edge_id.inner()
+        )
+    }
+
+    /// Compare equality with another Neighbor.
+    fn __eq__(&self, other: &PyNeighbor) -> bool {
+        self.node_id.inner() == other.node_id.inner()
+            && self.edge_id.inner() == other.edge_id.inner()
+    }
+}
+
+impl PyNeighbor {
+    /// Create a PyNeighbor from spider-core Neighbor.
+    pub(crate) fn from_rust(neighbor: traverse::Neighbor) -> Self {
+        PyNeighbor {
+            node_id: PyNodeId::from(neighbor.node_id.get()),
+            edge_id: PyEdgeId::from(neighbor.edge_id.get()),
+        }
     }
 }
 

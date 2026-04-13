@@ -28,6 +28,7 @@ fn spider(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<spider_handle::PySpider>()?;
     m.add_class::<types::PyNodeId>()?;
     m.add_class::<types::PyEdgeId>()?;
+    m.add_class::<types::PyNeighbor>()?;
     m.add_class::<types::PyDirection>()?;
     m.add_class::<types::PyBioTier>()?;
     m.add_class::<ingest::PyEntity>()?;
