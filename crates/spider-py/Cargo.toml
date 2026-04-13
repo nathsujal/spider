@@ -22,9 +22,10 @@ pyo3 = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 
-# Error handling
-anyhow = { workspace = true }
+# Concurrency
+parking_lot = "0.12"
 
 [features]
-default = ["extension-module"]
+default = []
 extension-module = ["pyo3/extension-module"]
+gil-refs = ["pyo3/gil-refs"]
