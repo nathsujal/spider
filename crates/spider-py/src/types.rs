@@ -88,6 +88,22 @@ impl From<&PyNodeId> for NodeId {
     }
 }
 
+impl PyNodeId {
+    /// Create a PyNodeId from a raw u32 value (internal use only).
+    ///
+    /// # Safety
+    /// The caller must ensure `raw` is non-zero.
+    pub(crate) fn from(raw: u32) -> Self {
+        debug_assert!(raw != 0, "PyNodeId::from called with 0");
+        PyNodeId { inner: raw }
+    }
+
+    /// Return the underlying u32 value (for internal use).
+    pub(crate) fn inner(&self) -> u32 {
+        self.inner
+    }
+}
+
 // ============================================================================
 // PyEdgeId
 // ============================================================================
