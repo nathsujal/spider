@@ -503,4 +503,105 @@ impl PySpider {
             Ok(PyBioTier::from(BioTier::from_score(score_val)))
         })
     }
+
+    // ========================================================================
+    // Node operations
+    // ========================================================================
+
+    /// Get the total number of live nodes in the database.
+    ///
+    /// Returns `metadata.next_node_id - 1`, which is the count of all node
+    /// slots ever created (including deleted ones). For the exact count of
+    /// live nodes, a full scan would be needed — this returns the upper bound.
+    ///
+    /// Returns:
+    ///     int: The number of node slots (live + deleted).
+    fn node_count(&self, py: Python<'_>) -> PyResult<u32> {
+        let inner = Arc::clone(&self.inner);
+
+        py.allow_threads(move || {
+            let db = inner.lock();
+            // next_node_id starts at 1, so count is next_node_id - 1
+            Ok(db.metadata.next_node_id - 1)
+        })
+    }
+
+    /// Touch a node, incrementing its access count and updating its last
+    /// accessed timestamp.
+    ///
+    /// This increases the node's bio vitality score by refreshing its
+    /// `last_accessed_at` to the current time and incrementing `access_count`.
+    ///
+    /// Args:
+    ///     node_id: The NodeId to touch.
+    ///
+    /// Returns:
+    ///     int: The new access count after incrementing.
+    ///
+    /// Raises:
+    ///     SpiderNotFoundError: If the node does not exist.
+    ///     SpiderIOError: If a file I/O error occurs.
+    fn node_touch(&self, py: Python<'_>, node_id: &PyNodeId) -> PyResult<u32> {
+        let inner = Arc::clone(&self.inner);
+        let nid = spider_core::db::nodes::NodeId::new(node_id.inner())
+            .map_err(db_error_to_pyerr)?;
+
+        py.allow_threads(move || {
+            let mut db = inner.lock();
+            let idx = nid.get() - 1;
+            let mut node = db.nodes.get(idx).map_err(db_error_to_pyerr)?;
+
+            // Check if node is deleted (tombstone)
+            if node.id == 0 {
+                return Err(db_error_to_pyerr(spider_core::error::DbError::NodeNotFound(nid.get())));
+            }
+
+            // Increment access_count (saturating) and update timestamp
+            node.access_count = node.access_count.saturating_add(1);
+            node.last_accessed_at = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as u32)
+                .unwrap_or(0);
+
+            db.nodes.set(idx, &node).map_err(db_error_to_pyerr)?;
+            Ok(node.access_count)
+        })
+    }
+
+    /// Set the significance value for a node.
+    ///
+    /// Significance affects the bio vitality score — higher significance
+    /// means a higher score. Valid range is 0-255.
+    ///
+    /// Args:
+    ///     node_id: The NodeId to update.
+    ///     significance: The new significance value (0-255).
+    ///
+    /// Raises:
+    ///     SpiderNotFoundError: If the node does not exist.
+    ///     SpiderIOError: If a file I/O error occurs.
+    fn set_significance(
+        &self,
+        py: Python<'_>,
+        node_id: &PyNodeId,
+        significance: u8,
+    ) -> PyResult<()> {
+        let inner = Arc::clone(&self.inner);
+        let nid = spider_core::db::nodes::NodeId::new(node_id.inner())
+            .map_err(db_error_to_pyerr)?;
+
+        py.allow_threads(move || {
+            let mut db = inner.lock();
+            let idx = nid.get() - 1;
+            let mut node = db.nodes.get(idx).map_err(db_error_to_pyerr)?;
+
+            // Check if node is deleted (tombstone)
+            if node.id == 0 {
+                return Err(db_error_to_pyerr(spider_core::error::DbError::NodeNotFound(nid.get())));
+            }
+
+            node.significance = significance;
+            db.nodes.set(idx, &node).map_err(db_error_to_pyerr)
+        })
+    }
 }
