@@ -1,0 +1,170 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "feat/**"]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # =========================================================================
+  # Rust: check and clippy
+  # =========================================================================
+  rust-check:
+    name: Rust Check & Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache cargo registry
+        uses: Swatinem/rust-cache@v2
+
+      - name: cargo check (no extension-module)
+        run: cargo check -p spider-py
+
+      - name: cargo check (with extension-module)
+        run: cargo check -p spider-py --features extension-module
+
+      - name: cargo clippy
+        run: cargo clippy -p spider-py -- -D warnings
+
+  # =========================================================================
+  # Python integration tests (maturin develop + pytest)
+  # =========================================================================
+  test:
+    name: Test (Python ${{ matrix.python }} on ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    needs: rust-check
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install maturin and pytest
+        run: |
+          python -m pip install --upgrade pip
+          pip install maturin pytest
+
+      - name: Build and install spider-py (dev mode)
+        working-directory: crates/spider-py
+        run: maturin develop
+
+      - name: Run integration tests
+        working-directory: crates/spider-py
+        run: pytest tests/ -v
+
+  # =========================================================================
+  # Build release wheels
+  # =========================================================================
+  build-wheels:
+    name: Build Wheel (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux x86_64
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          # Linux aarch64 (cross-compile via cross-rs)
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+          # macOS x86_64
+          - os: macos-13
+            target: x86_64-apple-darwin
+          # macOS aarch64 (Apple Silicon)
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          # Windows x86_64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Add target
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Cache cargo registry
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install maturin
+        run: pip install maturin
+
+      - name: Build wheel
+        working-directory: crates/spider-py
+        run: maturin build --release --features extension-module --target ${{ matrix.target }}
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheel-${{ matrix.target }}
+          path: target/wheels/*.whl
+          retention-days: 14
+
+  # =========================================================================
+  # Verify built wheels are installable
+  # =========================================================================
+  verify-wheels:
+    name: Verify Wheel
+    needs: build-wheels
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Download wheel artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: wheel-*
+          merge-multiple: true
+          path: dist
+
+      - name: Install wheel
+        run: pip install dist/*.whl
+
+      - name: Verify import
+        run: python -c "import spider; print('spider module loaded successfully')"
+
+      - name: Install pytest
+        run: pip install pytest
+
+      - name: Run tests against installed wheel
+        run: pytest crates/spider-py/tests/ -v

@@ -1,93 +1,62 @@
-### Spider: Bio-Inspired AI Agent Memory Graph
+# Spider
 
-A context-aware graph database that thinks like a human brain.
-Memories form, strengthen, decay and consolidate over time.
+**Bio-inspired AI agent memory graph database** — written in pure Rust.
 
-![Spider](./assets/spider-logo.png)
+Spider stores knowledge as a graph of **Documents → Propositions → Entities**, with vitality scoring that mimics how biological memories strengthen through use and fade with time.
 
-##### Status: Active Development
+## Quick Start
 
-Spider v2 is currently under development. Core features are being implemented. The API and architecture are subject to change.
+```bash
+# Build the workspace
+cargo build --release
 
-##### Vision
+# Inspect a database with the TUI
+cargo run -p spider-inspect -- ./my_graph
 
-Spider is a **long-term memory layer for AI agents** that mimics biological memory systems. Unlike traditional vector databases that treat all memories equally, Spider implements memory dynamics inspired by neuroscience:
+# Run the HTTP daemon
+cargo run -p spider-daemon -- --db-path ./my_graph --addr 0.0.0.0:3000
 
-- **Memories from** when information is added
-- **Strong memories** (frequently accessed, high significance) stays alive
-- **Weak memories** (rarely used, low importance) decay and get pruned
-- **Related memories** automaticlly connect and strenghten each other
-- **Knowledge consolidates** over time into higher-level concepts
-
-##### Why Spider?
-
-Most RAG systems treat memory as a static lookup table. Spider treats it as a **living, breathing system** that:
-
-- **Forgets** irrelevant information (reducing noise)
-- **Prioritizes** important memories (Bio-Score system)
-- **Clusters** related concepts
-- **Saves storage** (on-the-fly-embeddings)
-- Adapts to access patterns (hot/warm/cold storage tiering)
-
-##### Core-Principles
-
-1. **Bio-Inspired Memory Dynamics**
-Every node has a **Bio Score** that determines its *"life force"*:
-```
-Bio Score = f(frequency, significance, Δtime, gravity)
-
-Where:
-    - frequency: number of accesses/retrievals
-    - significance: user-assisted improtance
-    - gravity: system-assigned weight (constant)
-    - time: decay based on last access
-(Ebbinghaus curve)
+# Run tests
+cargo test
 ```
 
-**Memory Lifecycle:**
+## Workspace Structure
+
+| Crate | Description |
+|-------|-------------|
+| [`spider-core`](crates/spider-core/) | Storage engine — sync, blocking, direct file access. The heart of the system. |
+| [`spider-daemon`](crates/spider-daemon/) | HTTP/WebSocket API server (Axum + Tokio) with async job queue for LLM-powered ingestion. |
+| [`spider-inspect`](crates/spider-inspect/) | Interactive TUI for database inspection — graph visualization, integrity checks, REPL commands. |
+| [`spider-py`](crates/spider-py/) | PyO3 Python bindings — `import spider` for Python applications (in development). |
+
+## How It Works
+
+A document enters Spider as pre-extracted **propositions** (factual statements) with **entities** (named concepts). Spider wires them into a graph:
+
 ```
-High Bio Score -> Hot Storage (RAM) -> Instant access
-Medium Score -> Warm Storage (SSD) -> Fast access
-Low Score -> Cold storage (Archive) -> Slower, rehydratable
-Score <=0 -> Pruned (forgotten) -> Removed
+[Document] ──CONTAINS──► [Proposition] ──MENTIONS──► [Entity]
+           ──CONTAINS──► [Proposition] ──MENTIONS──► [Entity]
 ```
 
-2. **LEANN-Style Efficiency**
-Inspired by **[LEANN]**(https://github.com/yichuan-w/LEANN)
-- **No stored embeddings** - computed on-the-fly from content
-- **Hub node caching** - frequently accessed nodes cached in memory
-- **Incremental updates** - no re-embedding required
+Every node receives a **bio score** based on significance, access frequency, and time decay — mimicking how human memories strengthen or fade.
 
----
+## Documentation
 
-##### Design Decisions
+- **[ARCHITECTURE.md](ARCHITECTURE.md)** — Complete system architecture and document lifecycle walkthrough
+- **[crates/spider-core/README.md](crates/spider-core/README.md)** — Storage engine API and module overview
+- **[crates/spider-inspect/README.md](crates/spider-inspect/README.md)** — TUI usage and commands
+- **[crates/spider-py/BRAINSTORMING.md](crates/spider-py/BRAINSTORMING.md)** — Python bindings design (in development)
+- **[crates/spider-py/TASKS.md](crates/spider-py/TASKS.md)** — Implementation task list
 
-###### Why Fixed-Sized Records?
-- **O(1) Random Access**: ```offset = HEADER + (id - 1) * record_size```
-- **Memory Mapping**: OS handles caching, no manual buffer management
-- **Simple Persistence**: Direct memory mapping with periodic flush
-- **Predictable Performance**: No variable-length parsing overhead
+## Key Characteristics
 
-###### Why Property Graphs Over Pure Vector DB?
-- **Rich Relationships**: Capture explicit connections (not just similarity)
-- **Queryable Structure**: Filter by labels, traverse by relationship type
-- **Temporal Knowledge**: Track when facts became true/false
-- **Hybrid Retrieval**: Combine graph traversal + semantic search
+- **Synchronous core** — no async, no network, no LLM calls in spider-core
+- **Fixed-size records** — O(1) random access (Node: 29 bytes, Edge: 33 bytes)
+- **Embedded doubly-linked edge chains** — no separate adjacency index needed
+- **Content-addressable blobs** — SHA-256 deduplication
+- **Bio-inspired vitality scoring** — Hot / Warm / Cold / Pruned tiers
+- **Tombstone deletion** — nodes/edges are soft-deleted, enabling graceful corruption handling
 
-###### Why on-the-Fly Embeddings?
-- **Efficient Storage**
+## License
 
-###### Why Bio-Inspired Decay?
-- **Noise Reduction**: Irrelevant memories naturally fade
-- **Capacity Management**: Automatic pruning prevents unbounded growth
-- **Human-Like**: Matches how biological memory actually works
-
----
-
-##### License
-
-*To be determined*
-
----
-
-**Built with ❤️ by [Sujal Nath](https://github.com/nathsujal) for AI agents that remember like humans do.**
+MIT
